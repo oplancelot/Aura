@@ -38,7 +38,7 @@ aura/
 
 ### Prerequisites
 - Rust toolchain (1.75+)
-- .NET 8 SDK
+- .NET 10 SDK
 - Windows 10 Build 20348+ (for WASAPI process loopback)
 
 ### Build

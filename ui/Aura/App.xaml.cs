@@ -9,6 +9,9 @@ namespace Aura;
 /// </summary>
 public partial class App : Application
 {
+    private OverlayRenderer.TranslationOverlay? _overlay;
+    private WindowManager.TrayIconManager? _trayManager;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -24,15 +27,15 @@ public partial class App : Application
         }
 
         // 2. Start the overlay renderer (transparent OSD window)
-        var overlay = new OverlayRenderer.TranslationOverlay();
-        overlay.Start();
+        _overlay = new OverlayRenderer.TranslationOverlay();
+        _overlay.Start();
 
         // 3. Register the translation callback
-        Interop.AuraCoreBinding.RegisterCallback(overlay.OnTranslationReceived);
+        Interop.AuraCoreBinding.RegisterCallback(_overlay.OnTranslationReceived);
 
         // 4. Set up system tray icon
-        var trayManager = new WindowManager.TrayIconManager();
-        trayManager.Initialize();
+        _trayManager = new WindowManager.TrayIconManager();
+        _trayManager.Initialize();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -40,6 +43,8 @@ public partial class App : Application
         // Gracefully shut down the Rust core
         Interop.AuraCoreBinding.Stop();
         Interop.AuraCoreBinding.Destroy();
+        _trayManager?.Dispose();
+        _overlay?.Dispose();
         base.OnExit(e);
     }
 }

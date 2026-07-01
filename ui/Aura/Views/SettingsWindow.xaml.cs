@@ -24,6 +24,11 @@ public partial class SettingsWindow : Window
     private void OnRefreshProcesses(object sender, RoutedEventArgs e)
     {
         ProcessComboBox.Items.Clear();
+        ProcessComboBox.Items.Add(new ComboBoxItem
+        {
+            Content = "Self test (simulated subtitles)",
+            Tag = 0
+        });
 
         // Find common voice application processes
         var voiceApps = new[] { "Discord", "TeamSpeak", "ts3client", "Zoom", "Skype" };
@@ -43,10 +48,7 @@ public partial class SettingsWindow : Window
             });
         }
 
-        if (ProcessComboBox.Items.Count > 0)
-        {
-            ProcessComboBox.SelectedIndex = 0;
-        }
+        ProcessComboBox.SelectedIndex = 0;
     }
 
     /// <summary>

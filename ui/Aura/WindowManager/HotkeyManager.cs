@@ -10,7 +10,7 @@ namespace Aura.WindowManager;
 /// </summary>
 public class HotkeyManager : IDisposable
 {
-    private const int HOTKEY_ID = 0xAURA;
+    private const int HOTKEY_ID = 0xA001;
     private IntPtr _hwnd;
     private HwndSource? _source;
 
