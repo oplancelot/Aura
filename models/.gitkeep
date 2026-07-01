@@ -1,0 +1,8 @@
+# Models Directory
+
+Place AI model weights here:
+
+- `silero_vad.onnx` – Silero VAD model (download from [GitHub](https://github.com/snakers4/silero-vad))
+- `sensevoice-small-q8.ggml` – SenseVoice quantised model (optional, for local inference)
+
+These files are git-ignored due to their size. Use `git-lfs` or download separately.

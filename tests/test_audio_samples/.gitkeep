@@ -1,0 +1,7 @@
+# Test Audio Samples
+
+Place test WAV files here (16 kHz, mono, f32):
+
+- `english_speech.wav` – English speech for ASR testing
+- `japanese_speech.wav` – Japanese speech for multi-language testing
+- `mixed_noise_speech.wav` – Speech with game background noise for VAD testing

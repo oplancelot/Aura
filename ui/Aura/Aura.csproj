@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Aura</RootNamespace>
+    <AssemblyName>Aura</AssemblyName>
+    <ApplicationIcon>Resources\aura.ico</ApplicationIcon>
+    <Description>Real-time game voice translation OSD</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Direct2D hardware-accelerated overlay rendering -->
+    <PackageReference Include="GameOverlay.Net" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copy aura_core.dll to output directory -->
+    <None Include="..\core\target\release\aura_core.dll" 
+          Condition="Exists('..\core\target\release\aura_core.dll')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="aura_core.dll" />
+  </ItemGroup>
+
+</Project>

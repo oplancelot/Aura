@@ -1,0 +1,36 @@
+# ── Rust ──
+core/target/
+**/*.rs.bk
+
+# ── C# / .NET ──
+ui/**/bin/
+ui/**/obj/
+ui/**/.vs/
+*.user
+*.suo
+
+# ── IDE ──
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Models (large files) ──
+models/*.onnx
+models/*.ggml
+models/*.bin
+!models/.gitkeep
+
+# ── OS ──
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ── Build outputs ──
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
