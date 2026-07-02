@@ -41,11 +41,25 @@ impl Resampler {
 
         while self.phase < input.len() as f64 - 1.0 {
             let idx = self.phase as usize;
-            let frac = self.phase - idx as f64;
 
-            // Linear interpolation
-            let sample = input[idx] as f64 * (1.0 - frac) + input[idx + 1] as f64 * frac;
-            output.push(sample as f32);
+            if ratio >= 2.0 {
+                // Crude anti-aliasing: average the samples in the decimation window
+                let window = ratio as usize;
+                let mut sum = 0.0;
+                let mut count = 0;
+                for i in 0..window {
+                    if idx + i < input.len() {
+                        sum += input[idx + i] as f64;
+                        count += 1;
+                    }
+                }
+                output.push((sum / count as f64) as f32);
+            } else {
+                let frac = self.phase - idx as f64;
+                // Linear interpolation
+                let sample = input[idx] as f64 * (1.0 - frac) + input[idx + 1] as f64 * frac;
+                output.push(sample as f32);
+            }
 
             self.phase += ratio;
         }

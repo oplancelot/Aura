@@ -34,3 +34,9 @@ Desktop.ini
 *.ilk
 *.exp
 *.lib
+
+# corpus
+core/LibriSpeech ASR corpus/
+
+# ── Audio ──
+*.wav

@@ -10,16 +10,13 @@
 //! - Speech OFF threshold: probability < 0.35 (sustained over multiple frames)
 
 use anyhow::Result;
+use ort::{session::builder::GraphOptimizationLevel, session::Session, value::Tensor};
 
 /// Silero VAD model wrapper using ONNX Runtime.
 pub struct SileroVad {
-    // TODO: ort::Session for the ONNX model
-    /// Internal RNN hidden state (carried across frames for temporal context).
-    hidden_state: Vec<f32>,
-    /// Cell state for the LSTM layers.
-    cell_state: Vec<f32>,
-    /// Sample rate (must be 16000).
-    sample_rate: u32,
+    session: Session,
+    /// Internal RNN state [2, 1, 128].
+    state: Vec<f32>,
 }
 
 /// Result of a single VAD frame inference.
@@ -34,13 +31,12 @@ pub struct VadResult {
 impl SileroVad {
     /// Required number of samples per frame at 16 kHz.
     pub const FRAME_SAMPLES: usize = 512;
-    /// Required sample rate.
-    pub const SAMPLE_RATE: u32 = 16000;
-
-    /// Speech onset threshold.
-    pub const THRESHOLD_ON: f32 = 0.5;
-    /// Speech offset threshold (must be sustained).
-    pub const THRESHOLD_OFF: f32 = 0.35;
+    /// Sampling rate expected by Silero (16 kHz).
+    pub const SAMPLE_RATE: usize = 16000;
+    /// Speech ON probability threshold (lowered for loopback capture sensitivity).
+    pub const THRESHOLD_ON: f32 = 0.05;
+    /// Speech OFF probability threshold.
+    pub const THRESHOLD_OFF: f32 = 0.02;
 
     /// Load the Silero VAD ONNX model from the given path.
     ///
@@ -49,15 +45,18 @@ impl SileroVad {
     pub fn new(model_path: &str) -> Result<Self> {
         log::info!("Loading Silero VAD model from: {}", model_path);
 
-        // TODO: Phase 2 implementation
-        // 1. Create ort::Session from model_path
-        // 2. Initialize hidden_state and cell_state to zeros
-        // 3. Validate model input/output shapes
+        let session = Session::builder()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_optimization_level(GraphOptimizationLevel::Level1)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_intra_threads(1)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .commit_from_file(model_path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         Ok(Self {
-            hidden_state: vec![0.0; 128],  // Placeholder size
-            cell_state: vec![0.0; 128],
-            sample_rate: Self::SAMPLE_RATE,
+            session,
+            state: vec![0.0f32; 2 * 1 * 128],
         })
     }
 
@@ -76,12 +75,18 @@ impl SileroVad {
             frame.len()
         );
 
-        // TODO: Phase 2 implementation
-        // 1. Prepare input tensor [1, 512]
-        // 2. Feed hidden_state and cell_state as inputs
-        // 3. Run ort::Session::run()
-        // 4. Extract probability, updated hidden_state, updated cell_state
-        let probability = 0.0_f32; // Placeholder
+        let outputs = self.session.run(ort::inputs![
+            "input" => Tensor::from_array((vec![1, Self::FRAME_SAMPLES], frame.to_vec())).unwrap(),
+            "sr" => Tensor::from_array((Vec::<i64>::new(), vec![Self::SAMPLE_RATE as i64])).unwrap(),
+            "state" => Tensor::from_array((vec![2, 1, 128], self.state.clone())).unwrap(),
+        ]).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let output_data = outputs["output"].try_extract_tensor::<f32>().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let probability = output_data.1[0];
+
+        // Update state
+        let state_data = outputs["stateN"].try_extract_tensor::<f32>().map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.state.copy_from_slice(state_data.1);
 
         Ok(VadResult {
             probability,
@@ -91,7 +96,25 @@ impl SileroVad {
 
     /// Reset the model's internal RNN state (call between speakers or after silence).
     pub fn reset_state(&mut self) {
-        self.hidden_state.fill(0.0);
-        self.cell_state.fill(0.0);
+        self.state.fill(0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_silero_vad_init_and_zeros() {
+        let _ = ort::init().with_name("aura").commit(); // Ignore if already initialized
+
+        let mut vad = SileroVad::new("assets/silero_vad.onnx").unwrap();
+        let frame = vec![0.0f32; 512];
+        let result = vad.process_frame(&frame).unwrap();
+        
+        // Zeros should not be speech
+        assert!(!result.is_speech);
+        // Probability should be low
+        assert!(result.probability < 0.2);
     }
 }
