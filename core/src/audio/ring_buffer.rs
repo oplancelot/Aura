@@ -41,11 +41,13 @@ impl AudioRingBuffer {
         if let Ok(mut prod) = self.producer.lock() {
             let written = prod.push_slice(samples);
             if written < samples.len() {
-                self.overflowed.store(true, Ordering::Relaxed);
-                log::warn!(
-                    "Ring buffer overflow: dropped {} samples",
-                    samples.len() - written
-                );
+                let was_overflowed = self.overflowed.swap(true, Ordering::Relaxed);
+                if !was_overflowed {
+                    log::warn!(
+                        "Ring buffer overflow: dropped {} samples (further overflow logs suppressed until cleared)",
+                        samples.len() - written
+                    );
+                }
             }
         }
     }
