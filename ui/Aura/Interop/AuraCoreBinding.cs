@@ -56,6 +56,10 @@ public static class AuraCoreBinding
     private static extern void aura_core_set_target_lang(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string lang);
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void aura_core_set_model_path(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
     // ── Public API ──────────────────────────────────────────────────
 
     /// <summary>Initialise the core pipeline. Call once at startup.</summary>
@@ -85,4 +89,7 @@ public static class AuraCoreBinding
 
     /// <summary>Set the target translation language (ISO 639-1).</summary>
     public static void SetTargetLang(string lang) => aura_core_set_target_lang(lang);
+
+    /// <summary>Set the path to the Silero VAD ONNX model file.</summary>
+    public static void SetModelPath(string path) => aura_core_set_model_path(path);
 }
