@@ -17,10 +17,10 @@
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>  <!-- Title -->
-            <RowDefinition Height="Auto"/>  <!-- AI Engine -->
-            <RowDefinition Height="Auto"/>  <!-- API Key -->
-            <RowDefinition Height="Auto"/>  <!-- Target Language -->
-            <RowDefinition Height="Auto"/>  <!-- Target Process -->
+            <RowDefinition Height="Auto"/>  <!-- Target App -->
+            <RowDefinition Height="Auto"/>  <!-- Translate To -->
+            <RowDefinition Height="Auto"/>  <!-- Model -->
+            <RowDefinition Height="Auto"/>  <!-- API Key (conditional) -->
             <RowDefinition Height="*"/>     <!-- Spacer -->
             <RowDefinition Height="Auto"/>  <!-- Buttons -->
         </Grid.RowDefinitions>
@@ -31,25 +31,24 @@
             <TextBlock Text="Real-time Game Voice Translation" FontSize="13" Foreground="#6C7086"/>
         </StackPanel>
 
-        <!-- AI Engine Selection -->
+        <!-- Target Process -->
         <StackPanel Grid.Row="1" Margin="0,0,0,16">
-            <TextBlock Text="AI Translation Engine"/>
-            <ComboBox x:Name="EngineComboBox" Margin="0,4,0,0">
-                <ComboBoxItem Content="Gemini 2.5 Flash (Cloud)" IsSelected="True"/>
-                <ComboBoxItem Content="SenseVoice-Small (Local)"/>
-            </ComboBox>
-        </StackPanel>
-
-        <!-- API Key -->
-        <StackPanel Grid.Row="2" Margin="0,0,0,16">
-            <TextBlock Text="API Key (for cloud engines)"/>
-            <TextBox x:Name="ApiKeyTextBox"
-                     Margin="0,4,0,0"
-                     MaxLength="256"/>
+            <TextBlock Text="Target App"/>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="ProcessComboBox" Grid.Column="0"/>
+                <Button x:Name="RefreshButton" Grid.Column="1" Content="🔄" Margin="8,0,0,0"
+                        Width="40" Click="OnRefreshProcesses"/>
+            </Grid>
+            <TextBlock Text="Select Edge, Chrome, VLC, Discord, or Teams — or use Self Test (PID 0)"
+                       FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
         <!-- Target Language -->
-        <StackPanel Grid.Row="3" Margin="0,0,0,16">
+        <StackPanel Grid.Row="2" Margin="0,0,0,16">
             <TextBlock Text="Translate To"/>
             <ComboBox x:Name="TargetLangComboBox" Margin="0,4,0,0">
                 <ComboBoxItem Content="中文 (Chinese)" IsSelected="True" Tag="zh"/>
@@ -62,20 +61,23 @@
             </ComboBox>
         </StackPanel>
 
-        <!-- Target Process -->
-        <StackPanel Grid.Row="4" Margin="0,0,0,16">
-            <TextBlock Text="Target Voice App"/>
-            <Grid Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <ComboBox x:Name="ProcessComboBox" Grid.Column="0"/>
-                <Button x:Name="RefreshButton" Grid.Column="1" Content="🔄" Margin="8,0,0,0"
-                        Width="40" Click="OnRefreshProcesses"/>
-            </Grid>
-            <TextBlock Text="Select Discord, TeamSpeak, or another voice application"
-                       FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
+        <!-- AI Engine / Model -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,16">
+            <TextBlock Text="Model"/>
+            <ComboBox x:Name="EngineComboBox" Margin="0,4,0,0"
+                      SelectionChanged="OnEngineChanged">
+                <ComboBoxItem Content="SenseVoice-Small (Local, offline)" IsSelected="True"/>
+                <ComboBoxItem Content="Gemini 2.5 Flash (Cloud)"/>
+            </ComboBox>
+        </StackPanel>
+
+        <!-- API Key (only for cloud engines) -->
+        <StackPanel x:Name="ApiKeyPanel" Grid.Row="4" Margin="0,0,0,16"
+                    Visibility="Collapsed">
+            <TextBlock Text="API Key"/>
+            <TextBox x:Name="ApiKeyTextBox"
+                     Margin="0,4,0,0"
+                     MaxLength="256"/>
         </StackPanel>
 
         <!-- Action Buttons -->

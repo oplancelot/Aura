@@ -49,6 +49,16 @@ if (-not $SkipRust) {
         Write-Host "  [!] silero_vad.onnx not found at $vadModelSource" -ForegroundColor Yellow
     }
 
+    # Copy ASR model alongside the DLL
+    $asrModelSource = "$ProjectRoot\models\sense-voice-small-q4_k.gguf"
+    $asrModelDest = "$dllDest\sense-voice-small-q4_k.gguf"
+    if (Test-Path $asrModelSource) {
+        Copy-Item $asrModelSource $asrModelDest -Force
+        Write-Host "  ✓ sense-voice-small-q4_k.gguf → $dllDest" -ForegroundColor Green
+    } else {
+        Write-Host "  [!] sense-voice-small-q4_k.gguf not found at $asrModelSource" -ForegroundColor Yellow
+    }
+
     Pop-Location
 }
 

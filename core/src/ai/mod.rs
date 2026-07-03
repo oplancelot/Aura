@@ -9,6 +9,7 @@
 //! - [`sensevoice`] – SenseVoice-Small via ggml (local, optional)
 
 pub mod gemini_live;
+pub mod sense_voice_ffi;
 pub mod sensevoice;
 pub mod translator;
 

@@ -22,7 +22,7 @@ public class SubtitleQueue
     public int MaxVisibleLines { get; set; } = 3;
 
     /// <summary>How long a final subtitle stays on screen (seconds).</summary>
-    public double FinalDisplayDurationSec { get; set; } = 5.0;
+    public double FinalDisplayDurationSec { get; set; } = 8.0;
 
     /// <summary>Enqueue a new subtitle entry (thread-safe).</summary>
     public void Enqueue(SubtitleEntry entry)

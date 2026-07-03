@@ -26,11 +26,16 @@ public partial class App : Application
             return;
         }
 
-        // 2. Set VAD model path (co-located with the DLL in the bin directory)
+        // 2. Set model paths (co-located with the DLL in the bin directory)
         var modelPath = System.IO.Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory,
             "silero_vad.onnx");
         Interop.AuraCoreBinding.SetModelPath(modelPath);
+
+        var asrModelPath = System.IO.Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "sense-voice-small-q4_k.gguf");
+        Interop.AuraCoreBinding.SetAsrModelPath(asrModelPath);
 
         // 3. Start the overlay renderer (transparent OSD window)
         _overlay = new OverlayRenderer.TranslationOverlay();

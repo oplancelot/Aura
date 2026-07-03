@@ -8,6 +8,7 @@ pub type TranslationCallback =
 
 static CALLBACK: OnceLock<Mutex<Option<TranslationCallback>>> = OnceLock::new();
 static MODEL_PATH: OnceLock<Mutex<String>> = OnceLock::new();
+static ASR_MODEL_PATH: OnceLock<Mutex<String>> = OnceLock::new();
 static PIPELINE: OnceLock<Mutex<Option<PipelineState>>> = OnceLock::new();
 
 fn callback_slot() -> &'static Mutex<Option<TranslationCallback>> {
@@ -16,6 +17,10 @@ fn callback_slot() -> &'static Mutex<Option<TranslationCallback>> {
 
 fn model_path_slot() -> &'static Mutex<String> {
     MODEL_PATH.get_or_init(|| Mutex::new("assets/silero_vad.onnx".to_string()))
+}
+
+fn asr_model_path_slot() -> &'static Mutex<String> {
+    ASR_MODEL_PATH.get_or_init(|| Mutex::new(String::new()))
 }
 
 fn pipeline_slot() -> &'static Mutex<Option<PipelineState>> {
@@ -47,6 +52,7 @@ pub unsafe extern "C" fn aura_core_init() -> c_int {
     let _ = env_logger::builder().is_test(false).try_init();
     callback_slot();
     model_path_slot();
+    asr_model_path_slot();
     pipeline_slot();
     log::info!("aura_core_init() called");
     0
@@ -62,6 +68,18 @@ pub unsafe extern "C" fn aura_core_set_model_path(path: *const c_char) {
         *slot = path_str;
     }
     log::info!("VAD model path updated");
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn aura_core_set_asr_model_path(path: *const c_char) {
+    if path.is_null() {
+        return;
+    }
+    let path_str = CStr::from_ptr(path).to_string_lossy().into_owned();
+    if let Ok(mut slot) = asr_model_path_slot().lock() {
+        *slot = path_str;
+    }
+    log::info!("ASR model path updated");
 }
 
 #[no_mangle]
@@ -86,12 +104,17 @@ pub unsafe extern "C" fn aura_core_start(target_pid: u32) -> c_int {
         return 0;
     }
 
-    let model_path = model_path_slot()
+    let vad_path = model_path_slot()
         .lock()
         .map(|g| g.clone())
         .unwrap_or_else(|_| "assets/silero_vad.onnx".to_string());
 
-    match PipelineState::start(target_pid, true, &model_path) {
+    let asr_path = asr_model_path_slot()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+
+    match PipelineState::start(target_pid, true, &vad_path, &asr_path) {
         Ok(state) => {
             *pipeline = Some(state);
             0

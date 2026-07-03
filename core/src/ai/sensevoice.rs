@@ -1,100 +1,75 @@
-//! SenseVoice-Small local inference engine (optional / fallback).
-//!
-//! Uses SenseVoice.cpp (ggml backend) for fully offline, non-autoregressive
-//! speech recognition.  Processes 10s of audio in ~70ms on CPU.
-//!
-//! # Note
-//! This engine performs ASR only (speech → source text).  A separate local
-//! MT step may be needed for translation, or the source text can be sent
-//! to a lightweight cloud translation API.
+use std::ffi::CString;
+use std::os::raw::c_int;
+use std::sync::Mutex;
 
-use anyhow::Result;
-use std::time::Instant;
+use anyhow::{Context, Result};
 
-use super::translator::{TranslationEngine, TranslationRequest, TranslationResult};
+use super::sense_voice_ffi;
 
-/// Configuration for SenseVoice local inference.
-#[derive(Debug, Clone)]
-pub struct SenseVoiceConfig {
-    /// Path to the quantised ggml model file.
-    pub model_path: String,
-    /// Number of CPU threads to use for inference.
-    pub num_threads: u32,
-}
+const MAX_TEXT_LEN: usize = 4096;
 
-impl Default for SenseVoiceConfig {
-    fn default() -> Self {
-        Self {
-            model_path: "models/sensevoice-small-q8.ggml".to_string(),
-            num_threads: 4,
-        }
-    }
-}
-
-/// SenseVoice local translation engine.
 pub struct SenseVoiceEngine {
-    config: SenseVoiceConfig,
-    is_loaded: bool,
-    // TODO: FFI handle to SenseVoice.cpp context
+    handle: Mutex<*mut std::ffi::c_void>,
 }
+
+unsafe impl Send for SenseVoiceEngine {}
+unsafe impl Sync for SenseVoiceEngine {}
 
 impl SenseVoiceEngine {
-    pub fn new(config: SenseVoiceConfig) -> Self {
-        Self {
-            config,
-            is_loaded: false,
+    pub fn new(model_path: &str) -> Result<Self> {
+        let c_path = CString::new(model_path).context("Model path contains null byte")?;
+
+        let handle = unsafe { sense_voice_ffi::aura_sense_voice_load(c_path.as_ptr(), 0) };
+
+        if handle.is_null() {
+            anyhow::bail!("Failed to load SenseVoice model from: {}", model_path);
         }
-    }
-}
 
-impl TranslationEngine for SenseVoiceEngine {
-    fn name(&self) -> &str {
-        "SenseVoice-Small (Local)"
-    }
-
-    async fn initialize(&mut self) -> Result<()> {
-        log::info!(
-            "Loading SenseVoice model from: {} ({} threads)",
-            self.config.model_path,
-            self.config.num_threads
-        );
-
-        // TODO: Phase 3 (optional) implementation
-        // 1. Load ggml model via FFI
-        // 2. Warm up with a dummy inference
-
-        self.is_loaded = true;
-        Ok(())
-    }
-
-    async fn translate(&self, request: TranslationRequest) -> Result<TranslationResult> {
-        let start = Instant::now();
-
-        // TODO: Phase 3 implementation
-        // 1. Prepare audio tensor
-        // 2. Run non-autoregressive forward pass
-        // 3. Decode output tokens to text
-        // 4. (Optional) send source text to lightweight MT API
-
-        let latency = start.elapsed().as_millis() as u64;
-
-        Ok(TranslationResult {
-            detected_lang: None,
-            source_text: String::new(),
-            translated_text: "[SenseVoice placeholder]".to_string(),
-            latency_ms: latency,
-            is_provisional: request.is_provisional,
+        log::info!("SenseVoice model loaded from: {}", model_path);
+        Ok(Self {
+            handle: Mutex::new(handle),
         })
     }
 
-    async fn shutdown(&mut self) -> Result<()> {
-        log::info!("Unloading SenseVoice model");
-        // TODO: Free ggml context
-        self.is_loaded = false;
-        Ok(())
-    }
+    pub fn transcribe(&self, pcm_data: &[f32]) -> Result<String> {
+        let handle = self
+            .handle
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SenseVoice mutex poisoned: {}", e))?;
 
-    fn is_ready(&self) -> bool {
-        self.is_loaded
+        let mut out_buf = vec![0u8; MAX_TEXT_LEN];
+
+        let ret = unsafe {
+            sense_voice_ffi::aura_sense_voice_transcribe(
+                *handle,
+                pcm_data.as_ptr(),
+                pcm_data.len() as c_int,
+                out_buf.as_mut_ptr() as *mut i8,
+                MAX_TEXT_LEN as c_int,
+            )
+        };
+
+        if ret != 0 {
+            anyhow::bail!("SenseVoice transcribe failed with error: {}", ret);
+        }
+
+        let text = String::from_utf8_lossy(&out_buf)
+            .trim_end_matches('\0')
+            .to_string();
+
+        Ok(text)
+    }
+}
+
+impl Drop for SenseVoiceEngine {
+    fn drop(&mut self) {
+        if let Ok(handle) = self.handle.lock() {
+            if !handle.is_null() {
+                unsafe {
+                    sense_voice_ffi::aura_sense_voice_free(*handle);
+                }
+                log::info!("SenseVoice model freed");
+            }
+        }
     }
 }

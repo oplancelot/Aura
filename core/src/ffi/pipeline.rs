@@ -1,27 +1,54 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use crate::ai::sensevoice::SenseVoiceEngine;
 use crate::audio::capture::{AudioCapturer, CaptureConfig};
 use crate::audio::ring_buffer::AudioRingBuffer;
 use crate::vad::silero::SileroVad;
 use crate::vad::state_machine::{ChunkingConfig, ChunkingStateMachine, ChunkType};
 
-pub struct PipelineState {
-    pub capturer: AudioCapturer,
-    pub pipeline_thread: JoinHandle<()>,
-    pub stop_signal: Arc<AtomicBool>,
-    pub ring_buffer: Arc<AudioRingBuffer>,
+#[allow(dead_code)]
+pub enum PipelineState {
+    Live {
+        capturer: AudioCapturer,
+        pipeline_thread: JoinHandle<()>,
+        stop_signal: Arc<AtomicBool>,
+        ring_buffer: Arc<AudioRingBuffer>,
+        sense_voice: Option<Arc<SenseVoiceEngine>>,
+    },
+    SelfTest {
+        pipeline_thread: JoinHandle<()>,
+        stop_signal: Arc<AtomicBool>,
+    },
 }
 
 impl PipelineState {
     pub fn start(
         target_pid: u32,
         include_tree: bool,
-        model_path: &str,
+        vad_model_path: &str,
+        asr_model_path: &str,
     ) -> anyhow::Result<Self> {
         let stop_signal = Arc::new(AtomicBool::new(false));
+
+        if target_pid == 0 {
+            log::info!("Starting self-test mode (simulated subtitles)");
+            let thread_stop = Arc::clone(&stop_signal);
+            let pipeline_thread = thread::Builder::new()
+                .name("aura-pipeline".into())
+                .spawn(move || {
+                    run_self_test(thread_stop);
+                })
+                .expect("Failed to spawn pipeline thread");
+
+            return Ok(Self::SelfTest {
+                pipeline_thread,
+                stop_signal,
+            });
+        }
+
         let ring_buffer = Arc::new(AudioRingBuffer::new(16_000, 5.0));
 
         let config = CaptureConfig {
@@ -31,46 +58,117 @@ impl PipelineState {
         let mut capturer = AudioCapturer::new(config, Arc::clone(&ring_buffer));
         capturer.start()?;
 
+        let sense_voice = if !asr_model_path.is_empty() {
+            match SenseVoiceEngine::new(asr_model_path) {
+                Ok(engine) => {
+                    log::info!("SenseVoice ASR engine loaded");
+                    Some(Arc::new(engine))
+                }
+                Err(e) => {
+                    log::warn!("Failed to load SenseVoice ASR engine: {:#}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let thread_sv = sense_voice.as_ref().map(Arc::clone);
         let thread_stop = Arc::clone(&stop_signal);
         let thread_rb = Arc::clone(&ring_buffer);
-        let model_path_owned = model_path.to_owned();
+        let model_path_owned = vad_model_path.to_owned();
 
         let pipeline_thread = thread::Builder::new()
             .name("aura-pipeline".into())
             .spawn(move || {
-                if let Err(e) = run_pipeline(thread_stop, thread_rb, &model_path_owned) {
+                if let Err(e) = run_pipeline(thread_stop, thread_rb, &model_path_owned, thread_sv)
+                {
                     log::error!("Pipeline worker exited with error: {:#}", e);
                 }
             })
             .expect("Failed to spawn pipeline thread");
 
-        Ok(Self {
+        Ok(Self::Live {
             capturer,
             pipeline_thread,
             stop_signal,
             ring_buffer,
+            sense_voice,
         })
     }
 
-    pub fn stop(mut self) -> anyhow::Result<()> {
-        self.stop_signal.store(true, Ordering::SeqCst);
-
-        self.pipeline_thread
-            .join()
-            .map_err(|_| anyhow::anyhow!("Pipeline thread panicked"))?;
-
-        self.capturer
-            .stop()
-            .map_err(|e| anyhow::anyhow!("Failed to stop capturer: {}", e))?;
-
-        Ok(())
+    pub fn stop(self) -> anyhow::Result<()> {
+        match self {
+            Self::SelfTest { pipeline_thread, stop_signal } => {
+                stop_signal.store(true, Ordering::SeqCst);
+                pipeline_thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("Pipeline thread panicked"))?;
+                Ok(())
+            }
+            Self::Live { mut capturer, pipeline_thread, stop_signal, .. } => {
+                stop_signal.store(true, Ordering::SeqCst);
+                pipeline_thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("Pipeline thread panicked"))?;
+                capturer
+                    .stop()
+                    .map_err(|e| anyhow::anyhow!("Failed to stop capturer: {}", e))?;
+                Ok(())
+            }
+        }
     }
+}
+
+fn run_self_test(stop_signal: Arc<AtomicBool>) {
+    log::info!("Self-test pipeline started");
+    let phrases = [
+        "Hello, this is a self-test of the Aura real-time translation system.",
+        "The audio capture and speech recognition pipeline is working correctly.",
+        "Subtitles should appear in the overlay window on your screen.",
+        "You can now test with a real application like Edge or Chrome.",
+        "Select a target process from the dropdown menu and click Start Translation.",
+    ];
+
+    for phrase in phrases.iter().cycle() {
+        if stop_signal.load(Ordering::SeqCst) { break; }
+
+        // Charity-by-character typing effect via provisional updates (~50 chars per step)
+        let chars: Vec<char> = phrase.chars().collect();
+        let total = chars.len();
+        let mut pos = 0;
+        let step = 2;
+        while pos < total {
+            if stop_signal.load(Ordering::SeqCst) { break; }
+            let end = (pos + step).min(total);
+            let partial: String = chars[..end].iter().collect();
+            let latency = (end as i32) * 10;
+            super::exports::emit_translation(&partial, true, latency);
+            pos = end;
+            thread::sleep(Duration::from_millis(30));
+        }
+
+        if stop_signal.load(Ordering::SeqCst) { break; }
+
+        // Final — full sentence, committed
+        let ms = (total as i32) * 10 + 50;
+        super::exports::emit_translation(phrase, false, ms);
+
+        // Pause to let user read the complete sentence
+        for _ in 0..24 {
+            if stop_signal.load(Ordering::SeqCst) { break; }
+            thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    log::info!("Self-test pipeline stopped");
 }
 
 fn run_pipeline(
     stop_signal: Arc<AtomicBool>,
     ring_buffer: Arc<AudioRingBuffer>,
     model_path: &str,
+    sense_voice: Option<Arc<SenseVoiceEngine>>,
 ) -> anyhow::Result<()> {
     log::info!("Pipeline worker started");
 
@@ -101,11 +199,23 @@ fn run_pipeline(
                             ChunkType::Provisional => {
                                 (format!("[~] {}ms speech...", duration_ms), true)
                             }
-                            ChunkType::Final => {
-                                (format!("[✓] {}ms sentence", duration_ms), false)
-                            }
-                            ChunkType::HardCut => {
-                                (format!("[✂] {}ms (hard cut)", duration_ms), false)
+                            ChunkType::Final | ChunkType::HardCut => {
+                                if let Some(ref sv) = sense_voice {
+                                    match sv.transcribe(&chunk.samples) {
+                                        Ok(asr_text) if !asr_text.is_empty() => {
+                                            (asr_text, false)
+                                        }
+                                        Ok(_) => {
+                                            (format!("[✓] {}ms (no speech)", duration_ms), false)
+                                        }
+                                        Err(e) => {
+                                            log::warn!("ASR error: {:#}", e);
+                                            (format!("[✓] {}ms (ASR failed)", duration_ms), false)
+                                        }
+                                    }
+                                } else {
+                                    (format!("[✓] {}ms sentence", duration_ms), false)
+                                }
                             }
                         };
 

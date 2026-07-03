@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -151,45 +152,64 @@ public class TranslationOverlay : IDisposable
         _window.DragMove();
     }
 
+    private readonly List<Border> _subtitleBorders = new();
+    private static readonly FontFamily SubtitleFont = new("Segoe UI Semibold");
+    private static readonly SolidColorBrush ProvisionalBrush = new(Color.FromArgb(210, 220, 226, 240));
+    private static readonly SolidColorBrush FinalBrush = Brushes.White;
+    private static readonly SolidColorBrush BackgroundBrush = new(Color.FromArgb(150, 16, 18, 24));
+    private static readonly System.Windows.Media.Effects.DropShadowEffect TextShadow = new()
+    {
+        Color = Colors.Black,
+        BlurRadius = 8,
+        ShadowDepth = 2,
+        Opacity = 0.9
+    };
+
     private void RenderSubtitles()
     {
         if (_subtitlePanel == null) return;
 
         var entries = _subtitleQueue.Update();
-        _subtitlePanel.Children.Clear();
+        var count = Math.Min(entries.Count, _subtitleQueue.MaxVisibleLines);
+        var last = count > 0 ? entries[^Math.Min(count, entries.Count)..] : entries;
 
-        foreach (var entry in entries.TakeLast(_subtitleQueue.MaxVisibleLines))
+        // Recycle existing borders — grow or shrink the panel as needed
+        while (_subtitleBorders.Count > count)
+        {
+            _subtitlePanel.Children.Remove(_subtitleBorders[^1]);
+            _subtitleBorders.RemoveAt(_subtitleBorders.Count - 1);
+        }
+        while (_subtitleBorders.Count < count)
         {
             var text = new TextBlock
             {
-                Text = entry.Text,
-                Foreground = entry.IsProvisional
-                    ? new SolidColorBrush(Color.FromArgb(210, 220, 226, 240))
-                    : Brushes.White,
-                FontFamily = new FontFamily("Segoe UI Semibold"),
+                FontFamily = SubtitleFont,
                 FontSize = 28,
                 TextAlignment = TextAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = Math.Min(980, SystemParameters.PrimaryScreenWidth - 96),
-                Effect = new System.Windows.Media.Effects.DropShadowEffect
-                {
-                    Color = Colors.Black,
-                    BlurRadius = 8,
-                    ShadowDepth = 2,
-                    Opacity = 0.9
-                }
+                Effect = TextShadow
             };
-
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(150, 16, 18, 24)),
+                Background = BackgroundBrush,
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(14, 8, 14, 9),
                 Margin = new Thickness(0, 4, 0, 4),
                 Child = text
             };
-
+            _subtitleBorders.Add(border);
             _subtitlePanel.Children.Add(border);
+        }
+
+        // Update text and color on reused elements
+        for (int i = 0; i < count; i++)
+        {
+            var entry = last[i];
+            var border = _subtitleBorders[i];
+            var text = (TextBlock)border.Child;
+            text.Text = entry.Text;
+            text.Foreground = entry.IsProvisional ? ProvisionalBrush : FinalBrush;
         }
     }
 }

@@ -1,0 +1,3 @@
+[submodule "core/3rdparty/SenseVoice.cpp"]
+	path = core/3rdparty/SenseVoice.cpp
+	url = https://github.com/lovemefan/SenseVoice.cpp

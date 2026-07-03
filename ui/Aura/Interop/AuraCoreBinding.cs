@@ -60,6 +60,10 @@ public static class AuraCoreBinding
     private static extern void aura_core_set_model_path(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void aura_core_set_asr_model_path(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
     // ── Public API ──────────────────────────────────────────────────
 
     /// <summary>Initialise the core pipeline. Call once at startup.</summary>
@@ -92,4 +96,7 @@ public static class AuraCoreBinding
 
     /// <summary>Set the path to the Silero VAD ONNX model file.</summary>
     public static void SetModelPath(string path) => aura_core_set_model_path(path);
+
+    /// <summary>Set the path to the SenseVoice GGUF ASR model file.</summary>
+    public static void SetAsrModelPath(string path) => aura_core_set_asr_model_path(path);
 }

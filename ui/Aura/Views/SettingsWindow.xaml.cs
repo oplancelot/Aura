@@ -6,10 +6,6 @@ using System.Windows.Controls;
 
 namespace Aura.Views;
 
-/// <summary>
-/// Settings window code-behind.
-/// Handles user configuration and pipeline lifecycle.
-/// </summary>
 public partial class SettingsWindow : Window
 {
     public SettingsWindow()
@@ -18,9 +14,6 @@ public partial class SettingsWindow : Window
         OnRefreshProcesses(this, new RoutedEventArgs());
     }
 
-    /// <summary>
-    /// Refresh the list of running processes that could be voice applications.
-    /// </summary>
     private void OnRefreshProcesses(object sender, RoutedEventArgs e)
     {
         ProcessComboBox.Items.Clear();
@@ -30,11 +23,11 @@ public partial class SettingsWindow : Window
             Tag = 0
         });
 
-        // Find common voice application processes
-        var voiceApps = new[] { "Discord", "TeamSpeak", "ts3client", "Zoom", "Skype" };
+        var targetApps = new[] { "msedge", "edge", "chrome", "vlc", "discord",
+                                 "ms-teams", "MSTeams", "Teams" };
 
         var processes = Process.GetProcesses()
-            .Where(p => voiceApps.Any(app =>
+            .Where(p => p.Id > 0 && targetApps.Any(app =>
                 p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(p => p.ProcessName)
             .ToList();
@@ -51,9 +44,14 @@ public partial class SettingsWindow : Window
         ProcessComboBox.SelectedIndex = 0;
     }
 
-    /// <summary>
-    /// Start the translation pipeline.
-    /// </summary>
+    private void OnEngineChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ApiKeyPanel == null) return;
+        ApiKeyPanel.Visibility = EngineComboBox.SelectedIndex == 1
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
     private void OnStartClick(object sender, RoutedEventArgs e)
     {
         if (ProcessComboBox.SelectedItem is not ComboBoxItem selectedProcess)
@@ -65,31 +63,24 @@ public partial class SettingsWindow : Window
 
         var pid = (int)selectedProcess.Tag;
 
-        // Configure the engine
-        var engineIndex = EngineComboBox.SelectedIndex;
-        var engineName = engineIndex == 0 ? "gemini" : "sensevoice";
+        var engineName = EngineComboBox.SelectedIndex == 0 ? "sensevoice" : "gemini";
         Interop.AuraCoreBinding.SetEngine(engineName);
 
-        // Set API key
         if (!string.IsNullOrWhiteSpace(ApiKeyTextBox.Text))
         {
             Interop.AuraCoreBinding.SetApiKey(ApiKeyTextBox.Text);
         }
 
-        // Set target language
         if (TargetLangComboBox.SelectedItem is ComboBoxItem langItem && langItem.Tag is string lang)
         {
             Interop.AuraCoreBinding.SetTargetLang(lang);
         }
 
-        // Start pipeline
         int result = Interop.AuraCoreBinding.Start((uint)pid);
         if (result == 0)
         {
             StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
-
-            // Minimise to tray
             this.WindowState = WindowState.Minimized;
         }
         else
@@ -99,9 +90,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>
-    /// Stop the translation pipeline.
-    /// </summary>
     private void OnStopClick(object sender, RoutedEventArgs e)
     {
         Interop.AuraCoreBinding.Stop();
