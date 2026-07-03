@@ -26,14 +26,20 @@ public partial class App : Application
             return;
         }
 
-        // 2. Start the overlay renderer (transparent OSD window)
+        // 2. Set VAD model path (co-located with the DLL in the bin directory)
+        var modelPath = System.IO.Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "silero_vad.onnx");
+        Interop.AuraCoreBinding.SetModelPath(modelPath);
+
+        // 3. Start the overlay renderer (transparent OSD window)
         _overlay = new OverlayRenderer.TranslationOverlay();
         _overlay.Start();
 
-        // 3. Register the translation callback
+        // 4. Register the translation callback
         Interop.AuraCoreBinding.RegisterCallback(_overlay.OnTranslationReceived);
 
-        // 4. Set up system tray icon
+        // 5. Set up system tray icon
         _trayManager = new WindowManager.TrayIconManager();
         _trayManager.Initialize();
     }

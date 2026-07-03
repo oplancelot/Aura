@@ -39,6 +39,16 @@ if (-not $SkipRust) {
     Copy-Item $dllSource "$dllDest\aura_core.dll" -Force
     Write-Host "  ✓ aura_core.dll → $dllDest" -ForegroundColor Green
 
+    # Copy VAD model alongside the DLL
+    $vadModelSource = "$ProjectRoot\core\assets\silero_vad.onnx"
+    $vadModelDest = "$dllDest\silero_vad.onnx"
+    if (Test-Path $vadModelSource) {
+        Copy-Item $vadModelSource $vadModelDest -Force
+        Write-Host "  ✓ silero_vad.onnx → $dllDest" -ForegroundColor Green
+    } else {
+        Write-Host "  [!] silero_vad.onnx not found at $vadModelSource" -ForegroundColor Yellow
+    }
+
     Pop-Location
 }
 
