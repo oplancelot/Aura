@@ -19,9 +19,10 @@ SenseVoiceEngine::transcribe()  ←  pipeline.rs 调用
 ## 关键决策
 
 - **编译方式**：使用 `cmake` crate 编译 SenseVoice.cpp + ggml，`cc` crate 编译 C 包装层
-- **模型路径**：通过 `aura_core_set_model_path` 扩展，指向 `sense-voice-small-q4_k.gguf`
+- **模型路径**：新增 `aura_core_set_asr_model_path(path)` C API，与 Phase A 的 `aura_core_set_model_path` (VAD 模型) 分离存储，不冲突
 - **推理模式**：非流式 — Final/HardCut chunk 积累够后一次性推理；Provisional chunk 不做推理
 - **线程安全**：`SenseVoiceContext` 用 `Mutex` 包裹，一次一个推理
+- **同步阻塞**：ASR 推理 (~70ms/10s audio) 在 pipeline 线程同步执行。因 RingBuffer 有 5 秒缓冲，短暂阻塞不会导致丢帧。单线程顺序推理保持架构简单
 
 ## C 包装层 API
 
