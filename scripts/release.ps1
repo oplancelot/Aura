@@ -25,7 +25,7 @@ finally { Pop-Location }
 # --- Step 2: Publish Aura (self-contained) ---
 Write-Host "[2/5] Publishing Aura (self-contained)..." -ForegroundColor Cyan
 if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
-dotnet publish $AuraProject -c Release --self-contained -r win-x64 -o $PublishDir
+dotnet publish $AuraProject -c Release --no-self-contained -r win-x64 -o $PublishDir
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
 # Copy Rust core DLL

@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build Rust core
+        run: cargo build --release
+        working-directory: core
+
+      - name: Publish C# UI
+        run: dotnet publish --no-self-contained -r win-x64 -o publish
+        working-directory: ui/Aura
+
+      - name: Assemble release files
+        shell: pwsh
+        run: |
+          Copy-Item core/target/release/aura_core.dll ui/Aura/publish/
+          Copy-Item assets/silero_vad.onnx ui/Aura/publish/
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      - name: Package with Velopack
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^v'
+          vpk pack --packId Aura --packVersion $ver --packDir ui/Aura/publish --mainExe Aura.exe --releaseDir release-output
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-output/Setup.exe
+            release-output/RELEASES
+            release-output/*.nupkg
+          generate_release_notes: true
