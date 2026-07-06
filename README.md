@@ -44,14 +44,11 @@ aura/
 ### Build
 
 ```powershell
-.\scripts\build_all.ps1
+cd core && cargo build --release
+cd ../ui && dotnet build Aura.sln -c Release
 ```
 
-### Run (Dev)
-
-```powershell
-.\scripts\run_dev.ps1
-```
+Model files (`silero_vad.onnx` in repo, `sense-voice-small-q4_k.gguf` downloaded from HuggingFace) are copied automatically via csproj links. Start Aura from `ui/Aura/bin/Release/net10.0-windows/Aura.exe`.
 
 ## Controls
 
