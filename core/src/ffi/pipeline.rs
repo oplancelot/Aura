@@ -1,3 +1,6 @@
+use std::fs;
+use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -161,6 +164,87 @@ fn run_self_test(stop_signal: Arc<AtomicBool>) {
     log::info!("Self-test pipeline stopped");
 }
 
+// ── Diagnostic helpers ──────────────────────────────────────────────
+
+/// Logs VAD probability and decision to logs/vad_*.csv for offline analysis.
+struct VadLogger {
+    file: std::fs::File,
+    start: Instant,
+}
+
+impl VadLogger {
+    fn new() -> std::io::Result<Self> {
+        let dir = Path::new("logs");
+        let _ = fs::create_dir_all(dir);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let path = dir.join(format!("vad_{}.csv", ts));
+        let mut file = fs::File::create(&path)?;
+        writeln!(file, "elapsed_ms,probability,is_speech")?;
+        log::info!("VAD debug log: {}", path.display());
+        Ok(Self { file, start: Instant::now() })
+    }
+
+    fn log(&mut self, prob: f32, is_speech: bool) {
+        let elapsed = self.start.elapsed().as_secs_f64() * 1000.0;
+        let _ = writeln!(self.file, "{:.1},{:.4},{}", elapsed, prob, is_speech as u8);
+    }
+}
+
+/// Saves the first N seconds of captured audio to logs/capture_dump_*.raw
+/// for offline diagnosis of capture quality.
+struct CaptureDumper {
+    max_samples: usize,
+    buffer: Vec<f32>,
+    saved: bool,
+}
+
+impl CaptureDumper {
+    fn new(duration_secs: f32) -> Self {
+        Self {
+            max_samples: (16000.0 * duration_secs) as usize,
+            buffer: Vec::with_capacity((16000.0 * duration_secs) as usize),
+            saved: false,
+        }
+    }
+
+    fn feed(&mut self, samples: &[f32]) {
+        if self.saved {
+            return;
+        }
+        let remaining = self.max_samples - self.buffer.len();
+        let take = samples.len().min(remaining);
+        self.buffer.extend_from_slice(&samples[..take]);
+        if self.buffer.len() >= self.max_samples {
+            self.save();
+        }
+    }
+
+    fn save(&mut self) {
+        let dir = Path::new("logs");
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let path = dir.join(format!("capture_dump_{}.raw", ts));
+        let bytes: Vec<u8> = self.buffer
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        if fs::write(&path, &bytes).is_ok() {
+            log::info!(
+                "Capture dump saved: {} ({} samples, {:.1}s)",
+                path.display(),
+                self.buffer.len(),
+                self.buffer.len() as f64 / 16000.0
+            );
+        }
+        self.saved = true;
+    }
+}
+
 fn run_pipeline(
     stop_signal: Arc<AtomicBool>,
     mut consumer: AudioConsumer,
@@ -175,17 +259,27 @@ fn run_pipeline(
     let mut frame_buffer: Vec<f32> = Vec::with_capacity(16_000 * 2);
     let pipeline_start = Instant::now();
 
+    // Diagnostic logging
+    let mut vad_logger = VadLogger::new().ok();
+    let mut capture_dumper = CaptureDumper::new(10.0);
+
     while !stop_signal.load(Ordering::SeqCst) {
         let available = consumer.available();
-        if available >= SileroVad::FRAME_SAMPLES {
+        if available >= SileroVad::AUDIO_SAMPLES {
             if let Some(samples) = consumer.pull(available) {
                 frame_buffer.extend_from_slice(&samples);
 
-                while frame_buffer.len() >= SileroVad::FRAME_SAMPLES {
+                while frame_buffer.len() >= SileroVad::AUDIO_SAMPLES {
                     let frame: Vec<f32> =
-                        frame_buffer.drain(..SileroVad::FRAME_SAMPLES).collect();
+                        frame_buffer.drain(..SileroVad::AUDIO_SAMPLES).collect();
 
                     let vad_result = vad.process_frame(&frame)?;
+
+                    // Diagnostic: log VAD probability and dump captured audio
+                    if let Some(ref mut logger) = vad_logger {
+                        logger.log(vad_result.probability, vad_result.is_speech);
+                    }
+                    capture_dumper.feed(&frame);
 
                     if let Some(chunk) = state_machine.feed(&vad_result, &frame) {
                         let duration_ms =

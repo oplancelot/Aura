@@ -12,11 +12,16 @@
 use anyhow::Result;
 use ort::{session::builder::GraphOptimizationLevel, session::Session, value::Tensor};
 
-/// Silero VAD model wrapper using ONNX Runtime.
+/// Silero VAD v4 model wrapper using ONNX Runtime.
+///
+/// The v4 ONNX model expects **576 samples per frame**:
+/// 64 context samples (from previous frame) + 512 new audio samples at 16 kHz.
 pub struct SileroVad {
     session: Session,
     /// Internal RNN state [2, 1, 128].
     state: Vec<f32>,
+    /// Context buffer: last 64 samples from the previous frame.
+    context: Vec<f32>,
     /// Hysteresis state: tracks whether we are currently in a speech segment.
     is_speaking: bool,
 }
@@ -30,16 +35,19 @@ pub struct VadResult {
     pub is_speech: bool,
 }
 
+/// Context size: the v4 model prepends 64 context samples from the previous frame.
+const CONTEXT_SAMPLES: usize = 64;
+
 impl SileroVad {
-    /// Required number of samples per frame at 16 kHz.
-    pub const FRAME_SAMPLES: usize = 512;
+    /// Total samples passed to the ONNX model per frame (64 context + 512 audio).
+    pub const FRAME_SAMPLES: usize = 512 + CONTEXT_SAMPLES; // 576
+    /// New audio samples consumed per frame (excluding context).
+    pub const AUDIO_SAMPLES: usize = 512;
     /// Sampling rate expected by Silero (16 kHz).
     pub const SAMPLE_RATE: usize = 16000;
     /// Speech ON probability threshold.
-    /// Must exceed this to transition from silence → speech.
     pub const THRESHOLD_ON: f32 = 0.10;
     /// Speech OFF probability threshold.
-    /// Must drop below this to transition from speech → silence.
     pub const THRESHOLD_OFF: f32 = 0.05;
 
     /// Load the Silero VAD ONNX model from the given path.
@@ -61,11 +69,16 @@ impl SileroVad {
         Ok(Self {
             session,
             state: vec![0.0f32; 2 * 1 * 128],
+            context: vec![0.0f32; CONTEXT_SAMPLES],
             is_speaking: false,
         })
     }
 
-    /// Run inference on a single 32ms frame (exactly 512 samples at 16 kHz).
+    /// Run inference on a frame of `512` new audio samples at 16 kHz.
+    ///
+    /// The v4 ONNX model internally receives `576` samples:
+    /// 64 context samples (from the previous frame's tail) + 512 new samples.
+    /// Context is updated automatically after each call.
     ///
     /// Returns the speech probability and binary classification.
     ///
@@ -74,14 +87,19 @@ impl SileroVad {
     pub fn process_frame(&mut self, frame: &[f32]) -> Result<VadResult> {
         assert_eq!(
             frame.len(),
-            Self::FRAME_SAMPLES,
-            "Silero VAD requires exactly {} samples per frame, got {}",
-            Self::FRAME_SAMPLES,
+            Self::AUDIO_SAMPLES,
+            "Silero VAD requires exactly {} new audio samples per frame, got {}",
+            Self::AUDIO_SAMPLES,
             frame.len()
         );
 
+        // Concatenate context (64 samples from previous frame) with new audio (512 samples)
+        let mut model_input = Vec::with_capacity(Self::FRAME_SAMPLES);
+        model_input.extend_from_slice(&self.context);
+        model_input.extend_from_slice(frame);
+
         let outputs = self.session.run(ort::inputs![
-            "input" => Tensor::from_array((vec![1, Self::FRAME_SAMPLES], frame.to_vec())).unwrap(),
+            "input" => Tensor::from_array((vec![1, Self::FRAME_SAMPLES], model_input)).unwrap(),
             "sr" => Tensor::from_array((Vec::<i64>::new(), vec![Self::SAMPLE_RATE as i64])).unwrap(),
             "state" => Tensor::from_array((vec![2, 1, 128], self.state.clone())).unwrap(),
         ]).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -89,16 +107,17 @@ impl SileroVad {
         let output_data = outputs["output"].try_extract_tensor::<f32>().map_err(|e| anyhow::anyhow!("{e}"))?;
         let probability = output_data.1[0];
 
-        // Update state
+        // Update RNN state for the next call
         let state_data = outputs["stateN"].try_extract_tensor::<f32>().map_err(|e| anyhow::anyhow!("{e}"))?;
         self.state.copy_from_slice(state_data.1);
 
+        // Update context: last 64 samples of current frame become next frame's context
+        self.context.copy_from_slice(&frame[frame.len() - CONTEXT_SAMPLES..]);
+
         // Hysteresis: use different thresholds for onset vs. offset
         let is_speech = if self.is_speaking {
-            // Currently speaking — stay speaking until probability drops below OFF threshold
             probability > Self::THRESHOLD_OFF
         } else {
-            // Currently silent — only start speaking when probability exceeds ON threshold
             probability > Self::THRESHOLD_ON
         };
         self.is_speaking = is_speech;
@@ -109,9 +128,10 @@ impl SileroVad {
         })
     }
 
-    /// Reset the model's internal RNN state (call between speakers or after silence).
+    /// Reset the model's internal RNN state and context (call between speakers or after silence).
     pub fn reset_state(&mut self) {
         self.state.fill(0.0);
+        self.context.fill(0.0);
         self.is_speaking = false;
     }
 }

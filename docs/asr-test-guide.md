@@ -133,7 +133,60 @@ Start-Process -WorkingDirectory ui\Aura\bin\Release\net10.0-windows -FilePath Au
 
 ---
 
-## 3. 完整链路说明
+## 3. 诊断日志
+
+所有日志文件保存在运行目录下的 `logs/` 文件夹（即 `ui/Aura/bin/Release/net10.0-windows/logs/`）。
+
+| 文件 | 说明 |
+|------|------|
+| `asr_*.txt` | ASR 识别结果（C# 写入） |
+| `vad_*.csv` | VAD 每帧概率（Rust 诊断） |
+| `capture_dump_*.raw` | 捕获前 10s 原始 PCM |
+
+### VAD 诊断（vad_*.csv）
+
+记录每一帧（32ms）的 VAD 输出，用于分析 VAD 是否正常工作。
+
+| 字段 | 说明 |
+|------|------|
+| elapsed_ms | 从启动到该帧的毫秒数 |
+| probability | VAD 概率 [0,1] |
+| is_speech | 1=语音，0=静音 |
+
+**判断标准：**
+
+- 语音段 probability 应 > 0.5，静音段 < 0.1
+- 若全程 < 0.2 → 捕获到的音频可能是静音（捕获问题）
+- 若概率在 0.3~0.6 波动 → VAD 阈值需要调整
+
+### 捕获音频 Dump（capture_dump_*.raw）
+
+前 10 秒原始 PCM 数据，16kHz mono f32 小端字节序，**无 WAV 头**。
+
+回放验证方法：
+
+```powershell
+# 用 transcribe_wav 转写 dump 文件
+# 需要先封装 WAV 头，或用 Python
+python -c "
+import numpy as np
+import soundfile as sf
+data = np.frombuffer(open('logs/capture_dump_*.raw','rb').read(), dtype=np.float32)
+sf.write('dump.wav', data, 16000)
+"
+```
+
+然后用 `transcribe_wav` 转写生成的 `dump.wav`：
+
+```powershell
+cargo run --release --example transcribe_wav -- "dump.wav"
+```
+
+如果转写结果为空或有明显异常 → 捕获链路有问题，需检查 WASAPI 回环。
+
+---
+
+## 4. 完整链路说明
 
 ```
 VLC/浏览器播放音频
@@ -147,13 +200,15 @@ VLC/浏览器播放音频
 
 ---
 
-## 4. 测试结果参考
+## 5. 测试结果参考
 
 | 测试方式 | 音频 | WER | 说明 |
 |----------|------|-----|------|
 | CLI | LJSpeech LJ001-0001（9.7s） | 0.0% | ASR 质量好 |
 | CLI | LJSpeech 全部 13,100 条 | TBD | 跑批量脚本 |
 | GUI+VLC | LibriSpeech 84-121123（~5min） | 仅 1/29 句 | 捕获/VAD 问题 |
+
+**诊断方法：** 运行后检查 `logs/vad_*.csv` 确认 VAD 概率，用 `logs/capture_dump_*.raw` 回放确认捕获音频质量。
 
 **已知问题：**
 
@@ -163,7 +218,7 @@ VLC/浏览器播放音频
 
 ---
 
-## 5. 调整参数
+## 6. 调整参数
 
 ### VAD 阈值
 
@@ -186,7 +241,7 @@ hard_cut_ms: 28_000,         // 最长语音段（防 OOM）
 
 ---
 
-## 6. 单元测试
+## 7. 单元测试
 
 ```powershell
 cd core
