@@ -2,7 +2,7 @@
 //!
 //! Uses `ActivateAudioInterfaceAsync` with `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK`
 //! and `PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE` to capture audio from
-//! a specific process (e.g. Discord) and all its child processes, excluding game audio.
+//! a specific process (e.g. Discord) and all its child processes.
 //!
 //! # Latency
 //! Physical capture latency is ~10-15 ms (one device period in shared mode).
@@ -63,10 +63,9 @@ impl AudioCapturer {
 
     /// Start the capture loop on a background thread.
     ///
-    /// Internally uses `wasapi::AudioClient::new_application_loopback_client` to
-    /// create a process-specific loopback capture client in shared event-driven mode.
-    /// Audio is captured at 48 kHz stereo, mixed down to mono, resampled to 16 kHz,
-    /// and pushed into the ring buffer.
+    /// Internally spawns a capture thread that uses process-specific WASAPI loopback
+    /// to capture audio from the target PID. Audio is captured at 48 kHz stereo,
+    /// mixed down to mono, resampled to 16 kHz, and pushed into the ring buffer.
     pub fn start(&mut self) -> Result<()> {
         if self.is_capturing {
             anyhow::bail!("Capture already running");
@@ -137,15 +136,15 @@ impl Drop for AudioCapturer {
 ///
 /// This function:
 /// 1. Initializes COM (MTA) for the current thread
-/// 2. Opens the default render device in loopback mode (captures all system audio)
+/// 2. Attempts process-specific loopback; falls back to device-level loopback
 /// 3. Configures event-driven shared-mode capture at 48 kHz / f32 / stereo
 /// 4. Reads audio packets, converts stereo → mono, resamples 48 → 16 kHz
 /// 5. Pushes 16 kHz mono f32 samples into the ring buffer
 fn capture_worker(
     stop_signal: Arc<AtomicBool>,
     producer: &mut AudioProducer,
-    _target_pid: u32,
-    _include_tree: bool,
+    target_pid: u32,
+    include_tree: bool,
 ) -> Result<()> {
     use wasapi::*;
 
@@ -153,11 +152,23 @@ fn capture_worker(
     initialize_mta().ok().context("COM MTA initialization failed")?;
     log::debug!("COM MTA initialized on capture thread");
 
-    // Step 2: Create application loopback client
-    let mut audio_client =
-        AudioClient::new_application_loopback_client(target_pid, include_tree)
-            .context("Failed to create application loopback client")?;
-    log::debug!("Application loopback client created for PID {}", target_pid);
+    // Step 2: Try process-specific loopback, fall back to device loopback
+    let mut audio_client = match AudioClient::new_application_loopback_client(target_pid, include_tree) {
+        Ok(client) => {
+            log::info!("Process loopback client created for PID {}", target_pid);
+            client
+        }
+        Err(e) => {
+            log::warn!("Process loopback for PID {} failed ({}), falling back to device loopback", target_pid, e);
+            let enumerator = DeviceEnumerator::new()
+                .context("Failed to create DeviceEnumerator")?;
+            let device = enumerator.get_default_device(&Direction::Render)
+                .context("Failed to get default render device")?;
+            log::info!("Using default render device for loopback capture");
+            device.get_iaudioclient()
+                .context("Failed to get IAudioClient from render device")?
+        }
+    };
 
     // Step 3: Configure capture format — f32, 48 kHz, stereo with autoconvert
     let desired_format = WaveFormat::new(
@@ -206,7 +217,7 @@ fn capture_worker(
     audio_client
         .start_stream()
         .context("Failed to start audio stream")?;
-    log::info!("WASAPI capture stream started for PID {}", target_pid);
+    log::info!("WASAPI capture stream started");
 
     // Step 8: Event loop — read packets until stop signal
     while !stop_signal.load(Ordering::SeqCst) {
@@ -238,6 +249,8 @@ fn capture_worker(
     log::info!("WASAPI capture stream stopped");
     Ok(())
 }
+
+
 
 /// Process accumulated bytes in the sample queue.
 ///

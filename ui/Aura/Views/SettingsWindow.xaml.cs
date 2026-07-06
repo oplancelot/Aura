@@ -3,19 +3,32 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 
 namespace Aura.Views;
 
 public partial class SettingsWindow : Window
 {
+    private readonly DispatcherTimer _refreshTimer;
+
     public SettingsWindow()
     {
         InitializeComponent();
         OnRefreshProcesses(this, new RoutedEventArgs());
+
+        _refreshTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3)
+        };
+        _refreshTimer.Tick += (_, _) => OnRefreshProcesses(this, new RoutedEventArgs());
+        _refreshTimer.Start();
     }
 
     private void OnRefreshProcesses(object sender, RoutedEventArgs e)
     {
+        var prevPid = ProcessComboBox.SelectedItem is ComboBoxItem prev
+            ? (int)prev.Tag : -1;
+
         ProcessComboBox.Items.Clear();
         ProcessComboBox.Items.Add(new ComboBoxItem
         {
@@ -32,16 +45,19 @@ public partial class SettingsWindow : Window
             .OrderBy(p => p.ProcessName)
             .ToList();
 
-        foreach (var proc in processes)
+        var selectedIdx = 0;
+        for (int i = 0; i < processes.Count; i++)
         {
+            var proc = processes[i];
             ProcessComboBox.Items.Add(new ComboBoxItem
             {
                 Content = $"{proc.ProcessName} (PID: {proc.Id})",
                 Tag = proc.Id
             });
+            if (proc.Id == prevPid) selectedIdx = i + 1; // +1 for Self Test
         }
 
-        ProcessComboBox.SelectedIndex = 0;
+        ProcessComboBox.SelectedIndex = selectedIdx;
     }
 
     private void OnEngineChanged(object sender, SelectionChangedEventArgs e)

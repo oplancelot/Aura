@@ -37,10 +37,10 @@ impl SileroVad {
     pub const SAMPLE_RATE: usize = 16000;
     /// Speech ON probability threshold.
     /// Must exceed this to transition from silence → speech.
-    pub const THRESHOLD_ON: f32 = 0.45;
+    pub const THRESHOLD_ON: f32 = 0.10;
     /// Speech OFF probability threshold.
     /// Must drop below this to transition from speech → silence.
-    pub const THRESHOLD_OFF: f32 = 0.25;
+    pub const THRESHOLD_OFF: f32 = 0.05;
 
     /// Load the Silero VAD ONNX model from the given path.
     ///
