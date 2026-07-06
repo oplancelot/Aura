@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use super::resampler::Resampler;
-use super::ring_buffer::AudioRingBuffer;
+use super::ring_buffer::AudioProducer;
 
 /// Configuration for audio capture.
 #[derive(Debug, Clone)]
@@ -38,7 +38,8 @@ const EVENT_WAIT_TIMEOUT_MS: u32 = 100;
 /// Captures audio from a specific Windows process via WASAPI loopback.
 pub struct AudioCapturer {
     config: CaptureConfig,
-    ring_buffer: Arc<AudioRingBuffer>,
+    /// Producer half of the ring buffer, moved into the capture thread on start.
+    producer: Option<AudioProducer>,
     is_capturing: bool,
     /// Handle to the capture worker thread.
     capture_thread: Option<JoinHandle<()>>,
@@ -49,11 +50,11 @@ pub struct AudioCapturer {
 impl AudioCapturer {
     /// Create a new capturer targeting the given process.
     ///
-    /// The captured PCM samples will be pushed into the provided `ring_buffer`.
-    pub fn new(config: CaptureConfig, ring_buffer: Arc<AudioRingBuffer>) -> Self {
+    /// The captured PCM samples will be pushed into the provided `producer`.
+    pub fn new(config: CaptureConfig, producer: AudioProducer) -> Self {
         Self {
             config,
-            ring_buffer,
+            producer: Some(producer),
             is_capturing: false,
             capture_thread: None,
             stop_signal: Arc::new(AtomicBool::new(false)),
@@ -80,14 +81,15 @@ impl AudioCapturer {
         self.stop_signal.store(false, Ordering::SeqCst);
 
         let stop_signal = Arc::clone(&self.stop_signal);
-        let ring_buffer = Arc::clone(&self.ring_buffer);
+        let mut producer = self.producer.take()
+            .ok_or_else(|| anyhow::anyhow!("AudioProducer already consumed (capture already started?)"))?;
         let target_pid = self.config.target_pid;
         let include_tree = self.config.include_process_tree;
 
         let handle = thread::Builder::new()
             .name("aura-capture".into())
             .spawn(move || {
-                if let Err(e) = capture_worker(stop_signal, ring_buffer, target_pid, include_tree) {
+                if let Err(e) = capture_worker(stop_signal, &mut producer, target_pid, include_tree) {
                     log::error!("Capture worker exited with error: {:#}", e);
                 }
             })
@@ -135,15 +137,15 @@ impl Drop for AudioCapturer {
 ///
 /// This function:
 /// 1. Initializes COM (MTA) for the current thread
-/// 2. Creates a WASAPI application loopback client for the target PID
+/// 2. Opens the default render device in loopback mode (captures all system audio)
 /// 3. Configures event-driven shared-mode capture at 48 kHz / f32 / stereo
 /// 4. Reads audio packets, converts stereo → mono, resamples 48 → 16 kHz
 /// 5. Pushes 16 kHz mono f32 samples into the ring buffer
 fn capture_worker(
     stop_signal: Arc<AtomicBool>,
-    ring_buffer: Arc<AudioRingBuffer>,
-    target_pid: u32,
-    include_tree: bool,
+    producer: &mut AudioProducer,
+    _target_pid: u32,
+    _include_tree: bool,
 ) -> Result<()> {
     use wasapi::*;
 
@@ -223,12 +225,11 @@ fn capture_worker(
             }
         }
 
-        // Process complete frames from the byte queue
         process_sample_queue(
             &mut sample_queue,
             blockalign,
             &mut resampler,
-            &ring_buffer,
+            producer,
         );
     }
 
@@ -246,7 +247,7 @@ fn process_sample_queue(
     sample_queue: &mut VecDeque<u8>,
     blockalign: usize,
     resampler: &mut Resampler,
-    ring_buffer: &AudioRingBuffer,
+    producer: &mut AudioProducer,
 ) {
     // Each frame = blockalign bytes (8 bytes for f32 stereo: 4 bytes × 2 channels)
     let bytes_per_sample = std::mem::size_of::<f32>(); // 4
@@ -284,7 +285,7 @@ fn process_sample_queue(
 
     // Push into ring buffer for downstream VAD processing
     if !resampled.is_empty() {
-        ring_buffer.push(&resampled);
+        producer.push(&resampled);
     }
 }
 

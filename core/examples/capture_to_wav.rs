@@ -10,10 +10,9 @@
 //!   4. Play audio in the target app during the capture window
 //!   5. Check the generated `capture_output.wav` file
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aura_core::audio::{AudioCapturer, AudioRingBuffer};
+use aura_core::audio::{AudioCapturer, audio_ring_buffer};
 use aura_core::audio::capture::CaptureConfig;
 
 fn main() {
@@ -43,14 +42,14 @@ fn main() {
     println!();
 
     // Create ring buffer: 16kHz, 2 seconds capacity (we drain it frequently)
-    let ring_buffer = Arc::new(AudioRingBuffer::new(16000, 2.0));
+    let (producer, mut consumer) = audio_ring_buffer(16000, 2.0);
 
     // Create capturer
     let config = CaptureConfig {
         target_pid,
         include_process_tree: true,
     };
-    let mut capturer = AudioCapturer::new(config, Arc::clone(&ring_buffer));
+    let mut capturer = AudioCapturer::new(config, producer);
 
     // Start capture
     println!("[*] Starting capture... Play audio in the target app now!");
@@ -62,9 +61,9 @@ fn main() {
 
     while start.elapsed() < Duration::from_secs(duration_secs) {
         // Drain whatever is available in the ring buffer
-        let available = ring_buffer.available();
+        let available = consumer.available();
         if available > 0 {
-            if let Some(samples) = ring_buffer.pull(available) {
+            if let Some(samples) = consumer.pull(available) {
                 all_samples.extend_from_slice(&samples);
             }
         }
@@ -82,9 +81,9 @@ fn main() {
     }
 
     // Final drain
-    let available = ring_buffer.available();
+    let available = consumer.available();
     if available > 0 {
-        if let Some(samples) = ring_buffer.pull(available) {
+        if let Some(samples) = consumer.pull(available) {
             all_samples.extend_from_slice(&samples);
         }
     }
@@ -95,7 +94,7 @@ fn main() {
     capturer.stop().expect("Failed to stop capture");
 
     // Check overflow
-    if ring_buffer.take_overflow_flag() {
+    if consumer.take_overflow_flag() {
         println!("[!] WARNING: Some ring buffer overflow occurred (minor data loss)");
     }
 

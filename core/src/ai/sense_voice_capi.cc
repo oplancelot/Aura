@@ -32,8 +32,13 @@ int aura_sense_voice_transcribe(void* handle_ptr, const float* pcm_data,
     auto* handle = static_cast<SenseVoiceHandle*>(handle_ptr);
     if (!handle || !handle->ctx) return -1;
 
-    // Convert f32 PCM to f64 for SenseVoice.cpp API
-    std::vector<double> pcmf32(pcm_data, pcm_data + num_samples);
+    // Convert f32 PCM [-1.0, 1.0] to int16 range [-32768, 32768] as double.
+    // SenseVoice model was trained on int16 WAV data without normalization
+    // (load_wav_file divides by scale=1.0, not 32768).
+    std::vector<double> pcmf32(num_samples);
+    for (int i = 0; i < num_samples; i++) {
+        pcmf32[i] = static_cast<double>(pcm_data[i]) * 32768.0;
+    }
 
     sense_voice_full_params wparams = sense_voice_full_default_params(
         SENSE_VOICE_SAMPLING_GREEDY);

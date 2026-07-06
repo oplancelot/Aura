@@ -40,3 +40,4 @@ core/LibriSpeech ASR corpus/
 
 # ── Audio ──
 *.wav
+/OpenSLR

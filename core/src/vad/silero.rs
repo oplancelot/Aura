@@ -17,6 +17,8 @@ pub struct SileroVad {
     session: Session,
     /// Internal RNN state [2, 1, 128].
     state: Vec<f32>,
+    /// Hysteresis state: tracks whether we are currently in a speech segment.
+    is_speaking: bool,
 }
 
 /// Result of a single VAD frame inference.
@@ -33,10 +35,12 @@ impl SileroVad {
     pub const FRAME_SAMPLES: usize = 512;
     /// Sampling rate expected by Silero (16 kHz).
     pub const SAMPLE_RATE: usize = 16000;
-    /// Speech ON probability threshold (lowered for loopback capture sensitivity).
-    pub const THRESHOLD_ON: f32 = 0.05;
+    /// Speech ON probability threshold.
+    /// Must exceed this to transition from silence → speech.
+    pub const THRESHOLD_ON: f32 = 0.45;
     /// Speech OFF probability threshold.
-    pub const THRESHOLD_OFF: f32 = 0.02;
+    /// Must drop below this to transition from speech → silence.
+    pub const THRESHOLD_OFF: f32 = 0.25;
 
     /// Load the Silero VAD ONNX model from the given path.
     ///
@@ -57,6 +61,7 @@ impl SileroVad {
         Ok(Self {
             session,
             state: vec![0.0f32; 2 * 1 * 128],
+            is_speaking: false,
         })
     }
 
@@ -88,15 +93,26 @@ impl SileroVad {
         let state_data = outputs["stateN"].try_extract_tensor::<f32>().map_err(|e| anyhow::anyhow!("{e}"))?;
         self.state.copy_from_slice(state_data.1);
 
+        // Hysteresis: use different thresholds for onset vs. offset
+        let is_speech = if self.is_speaking {
+            // Currently speaking — stay speaking until probability drops below OFF threshold
+            probability > Self::THRESHOLD_OFF
+        } else {
+            // Currently silent — only start speaking when probability exceeds ON threshold
+            probability > Self::THRESHOLD_ON
+        };
+        self.is_speaking = is_speech;
+
         Ok(VadResult {
             probability,
-            is_speech: probability > Self::THRESHOLD_ON,
+            is_speech,
         })
     }
 
     /// Reset the model's internal RNN state (call between speakers or after silence).
     pub fn reset_state(&mut self) {
         self.state.fill(0.0);
+        self.is_speaking = false;
     }
 }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,6 +28,9 @@ public class TranslationOverlay : IDisposable
     private StackPanel? _subtitlePanel;
     private DispatcherTimer? _renderTimer;
     private bool _isClickThrough = true;
+    private StreamWriter? _logWriter;
+    private readonly object _logLock = new();
+    private DateTime _sessionStart;
 
     public TranslationOverlay()
     {
@@ -40,6 +44,23 @@ public class TranslationOverlay : IDisposable
     public void Start()
     {
         if (_window != null) return;
+
+        _sessionStart = DateTime.UtcNow;
+        try
+        {
+            var logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+            Directory.CreateDirectory(logDir);
+            var logPath = Path.Combine(logDir,
+                $"asr_{_sessionStart:yyyyMMdd_HHmmss}.txt");
+            _logWriter = new StreamWriter(logPath, append: false) { AutoFlush = true };
+            _logWriter.WriteLine($"# Aura ASR log — {_sessionStart:yyyy-MM-dd HH:mm:ss} UTC");
+            _logWriter.WriteLine("# [elapsed]\t[type]\t[text]");
+            _logWriter.WriteLine("# ---------\t------\t------");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to open ASR log: {ex.Message}");
+        }
 
         var overlayWidth = Math.Min(1100, SystemParameters.PrimaryScreenWidth - 96);
         var overlayHeight = 260;
@@ -102,12 +123,25 @@ public class TranslationOverlay : IDisposable
     /// </summary>
     public void OnTranslationReceived(string text, int isProvisional, int latencyMs)
     {
+        var now = DateTime.UtcNow;
+        var elapsed = now - _sessionStart;
+        var type = isProvisional != 0 ? "P" : "F";
+
+        // Write to log file
+        if (_logWriter != null)
+        {
+            lock (_logLock)
+            {
+                _logWriter.WriteLine($"{elapsed.TotalSeconds:F3}\t{type}\t{text}");
+            }
+        }
+
         var entry = new SubtitleEntry
         {
             Text = text,
             IsProvisional = isProvisional != 0,
             LatencyMs = latencyMs,
-            Timestamp = DateTime.UtcNow
+            Timestamp = now
         };
 
         _subtitleQueue.Enqueue(entry);
@@ -140,6 +174,17 @@ public class TranslationOverlay : IDisposable
         _renderTimer?.Stop();
         _hotkeyManager?.Dispose();
         _window?.Close();
+
+        if (_logWriter != null)
+        {
+            lock (_logLock)
+            {
+                var elapsed = DateTime.UtcNow - _sessionStart;
+                _logWriter.WriteLine($"# Session ended at {elapsed.TotalSeconds:F3}s");
+                _logWriter.Dispose();
+                _logWriter = null;
+            }
+        }
     }
 
     private void OnDragRequested(object sender, MouseButtonEventArgs e)
@@ -171,7 +216,7 @@ public class TranslationOverlay : IDisposable
 
         var entries = _subtitleQueue.Update();
         var count = Math.Min(entries.Count, _subtitleQueue.MaxVisibleLines);
-        var last = count > 0 ? entries[^Math.Min(count, entries.Count)..] : entries;
+        var last = count > 0 ? entries.Skip(entries.Count - count).ToList() : entries;
 
         // Recycle existing borders — grow or shrink the panel as needed
         while (_subtitleBorders.Count > count)

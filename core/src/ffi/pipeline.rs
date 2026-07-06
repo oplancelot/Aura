@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::ai::sensevoice::SenseVoiceEngine;
 use crate::audio::capture::{AudioCapturer, CaptureConfig};
-use crate::audio::ring_buffer::AudioRingBuffer;
+use crate::audio::ring_buffer::{AudioConsumer, audio_ring_buffer};
 use crate::vad::silero::SileroVad;
 use crate::vad::state_machine::{ChunkingConfig, ChunkingStateMachine, ChunkType};
 
@@ -15,7 +15,6 @@ pub enum PipelineState {
         capturer: AudioCapturer,
         pipeline_thread: JoinHandle<()>,
         stop_signal: Arc<AtomicBool>,
-        ring_buffer: Arc<AudioRingBuffer>,
         sense_voice: Option<Arc<SenseVoiceEngine>>,
     },
     SelfTest {
@@ -49,13 +48,13 @@ impl PipelineState {
             });
         }
 
-        let ring_buffer = Arc::new(AudioRingBuffer::new(16_000, 5.0));
+        let (producer, consumer) = audio_ring_buffer(16_000, 5.0);
 
         let config = CaptureConfig {
             target_pid,
             include_process_tree: include_tree,
         };
-        let mut capturer = AudioCapturer::new(config, Arc::clone(&ring_buffer));
+        let mut capturer = AudioCapturer::new(config, producer);
         capturer.start()?;
 
         let sense_voice = if !asr_model_path.is_empty() {
@@ -75,13 +74,12 @@ impl PipelineState {
 
         let thread_sv = sense_voice.as_ref().map(Arc::clone);
         let thread_stop = Arc::clone(&stop_signal);
-        let thread_rb = Arc::clone(&ring_buffer);
         let model_path_owned = vad_model_path.to_owned();
 
         let pipeline_thread = thread::Builder::new()
             .name("aura-pipeline".into())
             .spawn(move || {
-                if let Err(e) = run_pipeline(thread_stop, thread_rb, &model_path_owned, thread_sv)
+                if let Err(e) = run_pipeline(thread_stop, consumer, &model_path_owned, thread_sv)
                 {
                     log::error!("Pipeline worker exited with error: {:#}", e);
                 }
@@ -92,7 +90,6 @@ impl PipelineState {
             capturer,
             pipeline_thread,
             stop_signal,
-            ring_buffer,
             sense_voice,
         })
     }
@@ -166,7 +163,7 @@ fn run_self_test(stop_signal: Arc<AtomicBool>) {
 
 fn run_pipeline(
     stop_signal: Arc<AtomicBool>,
-    ring_buffer: Arc<AudioRingBuffer>,
+    mut consumer: AudioConsumer,
     model_path: &str,
     sense_voice: Option<Arc<SenseVoiceEngine>>,
 ) -> anyhow::Result<()> {
@@ -179,9 +176,9 @@ fn run_pipeline(
     let pipeline_start = Instant::now();
 
     while !stop_signal.load(Ordering::SeqCst) {
-        let available = ring_buffer.available();
+        let available = consumer.available();
         if available >= SileroVad::FRAME_SAMPLES {
-            if let Some(samples) = ring_buffer.pull(available) {
+            if let Some(samples) = consumer.pull(available) {
                 frame_buffer.extend_from_slice(&samples);
 
                 while frame_buffer.len() >= SileroVad::FRAME_SAMPLES {
@@ -200,6 +197,9 @@ fn run_pipeline(
                                 (format!("[~] {}ms speech...", duration_ms), true)
                             }
                             ChunkType::Final | ChunkType::HardCut => {
+                                // Reset VAD RNN state between utterances to
+                                // prevent hidden state leakage across segments
+                                vad.reset_state();
                                 if let Some(ref sv) = sense_voice {
                                     match sv.transcribe(&chunk.samples) {
                                         Ok(asr_text) if !asr_text.is_empty() => {

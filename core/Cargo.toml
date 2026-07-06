@@ -34,6 +34,7 @@ url = "2"
 # --- Utilities ---
 crossbeam-queue = "0.3"            # Lock-free SPSC ring buffer
 ringbuf = "0.4"                    # High-perf ring buffer alternative
+rubato = "0.16"                    # High-quality sinc resampler (48kHz → 16kHz)
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"

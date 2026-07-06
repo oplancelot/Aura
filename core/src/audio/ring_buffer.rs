@@ -8,72 +8,85 @@
 use ringbuf::HeapRb;
 use ringbuf::traits::{Producer, Consumer, Split, Observer};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-/// Thread-safe audio ring buffer for bridging capture ↔ processing threads.
+/// Shared overflow flag between producer and consumer.
+type OverflowFlag = Arc<AtomicBool>;
+
+/// Producer half of the audio ring buffer (capture thread).
 ///
-/// # Capacity
-/// Default capacity: 16000 × 5 = 80 000 samples (5 seconds at 16 kHz).
-/// This provides ample headroom even if the VAD thread is momentarily stalled.
-pub struct AudioRingBuffer {
-    producer: std::sync::Mutex<ringbuf::HeapProd<f32>>,
-    consumer: std::sync::Mutex<ringbuf::HeapCons<f32>>,
-    overflowed: AtomicBool,
+/// This side pushes samples and must never block.
+pub struct AudioProducer {
+    inner: ringbuf::HeapProd<f32>,
+    overflowed: OverflowFlag,
 }
 
-impl AudioRingBuffer {
-    /// Create a new ring buffer with capacity for `duration_secs` seconds at `sample_rate` Hz.
-    pub fn new(sample_rate: u32, duration_secs: f32) -> Self {
-        let capacity = (sample_rate as f32 * duration_secs) as usize;
-        let rb = HeapRb::<f32>::new(capacity);
-        let (producer, consumer) = rb.split();
-        Self {
-            producer: std::sync::Mutex::new(producer),
-            consumer: std::sync::Mutex::new(consumer),
-            overflowed: AtomicBool::new(false),
-        }
-    }
+/// Consumer half of the audio ring buffer (pipeline/VAD thread).
+///
+/// This side pulls samples for downstream processing.
+pub struct AudioConsumer {
+    inner: ringbuf::HeapCons<f32>,
+    overflowed: OverflowFlag,
+}
 
+/// Create a new SPSC audio ring buffer pair.
+///
+/// # Capacity
+/// Capacity = `sample_rate × duration_secs` samples.
+/// Default usage: 16000 × 5 = 80 000 samples (5 seconds at 16 kHz).
+pub fn audio_ring_buffer(sample_rate: u32, duration_secs: f32) -> (AudioProducer, AudioConsumer) {
+    let capacity = (sample_rate as f32 * duration_secs) as usize;
+    let rb = HeapRb::<f32>::new(capacity);
+    let (producer, consumer) = rb.split();
+    let overflowed = Arc::new(AtomicBool::new(false));
+
+    (
+        AudioProducer {
+            inner: producer,
+            overflowed: Arc::clone(&overflowed),
+        },
+        AudioConsumer {
+            inner: consumer,
+            overflowed,
+        },
+    )
+}
+
+impl AudioProducer {
     /// Push samples from the capture callback thread.
     ///
     /// If the buffer is full, the oldest samples are silently dropped
     /// and the `overflowed` flag is set.
-    pub fn push(&self, samples: &[f32]) {
-        if let Ok(mut prod) = self.producer.lock() {
-            let written = prod.push_slice(samples);
-            if written < samples.len() {
-                let was_overflowed = self.overflowed.swap(true, Ordering::Relaxed);
-                if !was_overflowed {
-                    log::warn!(
-                        "Ring buffer overflow: dropped {} samples (further overflow logs suppressed until cleared)",
-                        samples.len() - written
-                    );
-                }
+    pub fn push(&mut self, samples: &[f32]) {
+        let written = self.inner.push_slice(samples);
+        if written < samples.len() {
+            let was_overflowed = self.overflowed.swap(true, Ordering::Relaxed);
+            if !was_overflowed {
+                log::warn!(
+                    "Ring buffer overflow: dropped {} samples (further overflow logs suppressed until cleared)",
+                    samples.len() - written
+                );
             }
         }
     }
+}
 
+impl AudioConsumer {
     /// Pull exactly `count` samples for VAD processing.
     ///
     /// Returns `None` if fewer than `count` samples are available.
-    pub fn pull(&self, count: usize) -> Option<Vec<f32>> {
-        if let Ok(mut cons) = self.consumer.lock() {
-            if cons.occupied_len() < count {
-                return None;
-            }
-            let mut buf = vec![0.0f32; count];
-            cons.pop_slice(&mut buf);
-            Some(buf)
-        } else {
-            None
+    pub fn pull(&mut self, count: usize) -> Option<Vec<f32>> {
+        if self.inner.occupied_len() < count {
+            return None;
         }
+        let mut buf = vec![0.0f32; count];
+        self.inner.pop_slice(&mut buf);
+        Some(buf)
     }
 
     /// Returns the number of samples currently buffered.
     pub fn available(&self) -> usize {
-        self.consumer
-            .lock()
-            .map(|c| c.occupied_len())
-            .unwrap_or(0)
+        self.inner.occupied_len()
     }
 
     /// Check and clear the overflow flag.

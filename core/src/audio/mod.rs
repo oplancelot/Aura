@@ -11,4 +11,4 @@ pub mod ring_buffer;
 
 pub use capture::AudioCapturer;
 pub use resampler::Resampler;
-pub use ring_buffer::AudioRingBuffer;
+pub use ring_buffer::{AudioProducer, AudioConsumer, audio_ring_buffer};

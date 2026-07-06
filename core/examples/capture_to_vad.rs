@@ -9,11 +9,10 @@
 //!   3. Run: cargo run --example capture_to_vad -- 12345 30
 //!   4. Speak or play audio with pauses to see chunks being emitted
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aura_core::audio::capture::CaptureConfig;
-use aura_core::audio::{AudioCapturer, AudioRingBuffer};
+use aura_core::audio::{AudioCapturer, audio_ring_buffer};
 use aura_core::vad::silero::SileroVad;
 use aura_core::vad::state_machine::{ChunkingConfig, ChunkingStateMachine, ChunkType};
 
@@ -42,14 +41,14 @@ fn main() {
     let mut state_machine = ChunkingStateMachine::new(ChunkingConfig::default());
 
     // Create ring buffer
-    let ring_buffer = Arc::new(AudioRingBuffer::new(16000, 2.0));
+    let (producer, mut consumer) = audio_ring_buffer(16000, 2.0);
 
     // Create capturer
     let config = CaptureConfig {
         target_pid,
         include_process_tree: true,
     };
-    let mut capturer = AudioCapturer::new(config, Arc::clone(&ring_buffer));
+    let mut capturer = AudioCapturer::new(config, producer);
 
     // Start capture
     println!("[*] Starting capture... Speak/Play audio with pauses now!");
@@ -72,9 +71,9 @@ fn main() {
     let mut chunk_counter = 0;
 
     while start.elapsed() < Duration::from_secs(duration_secs) {
-        let available = ring_buffer.available();
+        let available = consumer.available();
         if available > 0 {
-            if let Some(samples) = ring_buffer.pull(available) {
+            if let Some(samples) = consumer.pull(available) {
                 chunk_buffer.extend_from_slice(&samples);
 
                 // Process every 512 samples
