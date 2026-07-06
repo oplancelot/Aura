@@ -28,10 +28,9 @@ WASAPI Capture → Ring Buffer → Silero VAD → Chunking State Machine → AI 
 aura/
 ├── core/           # Rust core DLL (audio → VAD → ASR → FFI)
 ├── ui/             # C# WPF application (OSD overlay + settings)
-├── assets/         # AI model weights (Silero VAD, SenseVoice)
-├── scripts/        # Build & dev scripts
-├── docs/           # Architecture documentation
-└── tests/          # Integration tests
+├── assets/         # AI model weights (Silero VAD)
+├── scripts/        # Build, dev & test scripts
+└── docs/           # Architecture & design documentation
 ```
 
 ## Quick Start

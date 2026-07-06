@@ -1,9 +1,10 @@
 //! Silero VAD ONNX inference wrapper.
 //!
 //! Silero VAD is a lightweight neural-network-based voice activity detector that
-//! runs efficiently on CPU via ONNX Runtime.  It expects exactly **512 samples**
-//! per call at **16 kHz** (= 32 ms frame), and returns a probability score [0, 1]
-//! indicating how likely the frame contains human speech.
+//! runs efficiently on CPU via ONNX Runtime.  It expects exactly **576 samples**
+//! per call at **16 kHz** (64 context + 512 new samples = 36 ms frame), and
+//! returns a probability score [0, 1] indicating how likely the frame contains
+//! human speech.
 //!
 //! # Hysteresis
 //! - Speech ON  threshold: probability > 0.5

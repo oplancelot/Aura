@@ -43,6 +43,9 @@ core/LibriSpeech ASR corpus/
 *.wav
 /OpenSLR
 
+# ── Test outputs ──
+asr_batch_results*.csv
+
 # ── Generated feature files ──
 fbank_lfr_cmvn_feature.json
 

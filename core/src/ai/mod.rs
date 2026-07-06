@@ -5,8 +5,8 @@
 //! this trait — the rest of the pipeline doesn't care about the backend.
 //!
 //! ## Current implementations
-//! - [`gemini_live`] – Google Gemini 2.5 Flash Native Audio Live API (cloud, default)
-//! - [`sensevoice`] – SenseVoice-Small via ggml (local, optional)
+//! - [`sensevoice`] – SenseVoice-Small via ggml (local, default)
+//! - [`gemini_live`] – Google Gemini 2.5 Flash Native Audio Live API (cloud, planned)
 
 pub mod gemini_live;
 pub mod sense_voice_ffi;

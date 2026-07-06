@@ -1,6 +1,6 @@
 # Aura Architecture
 
-See [implementation_plan.md](../../implementation_plan.md) for the full architecture breakdown.
+See [2026-07-01-实时游戏语音翻译资源.md](2026-07-01-实时游戏语音翻译资源.md) for the full architecture breakdown.
 
 ## Data Flow
 
