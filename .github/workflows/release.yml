@@ -62,7 +62,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-output/Setup.exe
+            release-output/*-Setup.exe
+            release-output/*-Portable.zip
             release-output/RELEASES
             release-output/*.nupkg
           generate_release_notes: true
