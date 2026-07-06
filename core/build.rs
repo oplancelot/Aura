@@ -8,13 +8,18 @@ fn main() {
     // Build SenseVoice.cpp + ggml via cmake.
     // We pass /utf-8 (for Chinese comments in source) and /EHsc (C++ exceptions),
     // overriding the GCC-style flags the upstream CMakeLists.txt appends on MSVC.
-    let dst = cmake::Config::new("3rdparty/SenseVoice.cpp")
+    // Generator can be overridden via AURA_CMAKE_GENERATOR env var for CI.
+    let mut cmake_cfg = cmake::Config::new("3rdparty/SenseVoice.cpp");
+    cmake_cfg
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("SENSE_VOICE_BUILD_EXAMPLES", "OFF")
         .define("CMAKE_CXX_FLAGS_DEBUG", "/nologo /MD /utf-8 /EHsc")
         .define("CMAKE_CXX_FLAGS_RELEASE", "/nologo /MD /utf-8 /EHsc /O2")
-        .very_verbose(true)
-        .build();
+        .very_verbose(true);
+    if let Ok(gen) = std::env::var("AURA_CMAKE_GENERATOR") {
+        cmake_cfg.generator(&gen);
+    }
+    let dst = cmake_cfg.build();
 
     // SenseVoice.cpp doesn't install sense-voice-core.lib, so we need to find it
     // in the build tree under the configuration-specific subdirectory.
