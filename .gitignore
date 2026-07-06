@@ -16,10 +16,11 @@ ui/**/.vs/
 *.swp
 *.swo
 
-# ── Models (large files) ──
+# ── Models (large files) — use Git LFS or download script ──
 models/*.onnx
 models/*.ggml
 models/*.bin
+*.gguf
 !models/.gitkeep
 
 # ── OS ──
@@ -41,3 +42,6 @@ core/LibriSpeech ASR corpus/
 # ── Audio ──
 *.wav
 /OpenSLR
+
+# ── Generated feature files ──
+fbank_lfr_cmvn_feature.json

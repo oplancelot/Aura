@@ -144,7 +144,7 @@ mod tests {
     fn test_silero_vad_init_and_zeros() {
         let _ = ort::init().with_name("aura").commit(); // Ignore if already initialized
 
-        let mut vad = SileroVad::new("assets/silero_vad.onnx").unwrap();
+        let mut vad = SileroVad::new("../assets/silero_vad.onnx").unwrap();
         let frame = vec![0.0f32; 512];
         let result = vad.process_frame(&frame).unwrap();
         
