@@ -41,7 +41,11 @@ jobs:
           Copy-Item assets/silero_vad.onnx ui/Aura/publish/
 
       - name: Install vpk
-        run: dotnet tool install -g vpk
+        shell: pwsh
+        run: |
+          if (-not (dotnet tool list -g | Select-String 'vpk')) {
+            dotnet tool install -g vpk
+          }
 
       - name: Package with Velopack
         shell: pwsh
