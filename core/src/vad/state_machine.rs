@@ -3,11 +3,11 @@
 //! This state machine sits between the VAD and the AI engine, deciding *when*
 //! to submit audio chunks for translation.  It implements three rules:
 //!
-//! 1. **Short-sentence close** – VAD detects silence > 800 ms → emit Final Chunk
+//! 1. **Short-sentence close** – VAD detects silence > 400 ms → emit Final Chunk
 //! 2. **Long-sentence provisional** – continuous speech > 2s → emit Provisional Chunk
 //!    every 200 ms for instant visual feedback
-//! 3. **Hard cut** – continuous speech > 28s → force-split with 2s overlap to
-//!    prevent GPU OOM
+//! 3. **Hard cut** – continuous speech > 5s → force-split with 2s overlap for
+//!    timely ASR output
 
 use std::time::{Duration, Instant};
 
@@ -18,13 +18,13 @@ use super::silero::VadResult;
 /// Timing parameters for the chunking state machine.
 #[derive(Debug, Clone)]
 pub struct ChunkingConfig {
-    /// Silence duration to confirm sentence end (default: 800 ms).
+    /// Silence duration to confirm sentence end (default: 400 ms).
     pub silence_close_ms: u64,
     /// Continuous speech threshold before provisional decoding starts (default: 2000 ms).
     pub provisional_start_ms: u64,
     /// Interval between provisional chunk emissions (default: 200 ms).
     pub provisional_interval_ms: u64,
-    /// Hard maximum for continuous speech before forced split (default: 28 000 ms).
+    /// Hard maximum for continuous speech before forced split (default: 5 000 ms).
     pub hard_cut_ms: u64,
     /// Overlap duration at hard-cut boundaries (default: 2000 ms).
     pub hard_cut_overlap_ms: u64,
@@ -33,10 +33,10 @@ pub struct ChunkingConfig {
 impl Default for ChunkingConfig {
     fn default() -> Self {
         Self {
-            silence_close_ms: 1200,
+            silence_close_ms: 400,
             provisional_start_ms: 2000,
             provisional_interval_ms: 200,
-            hard_cut_ms: 28_000,
+            hard_cut_ms: 5_000,
             hard_cut_overlap_ms: 2000,
         }
     }
