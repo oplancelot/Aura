@@ -8,10 +8,33 @@ using System.Windows.Threading;
 
 namespace Aura.Views;
 
+public class ModelSource
+{
+    public string Name { get; init; } = "";
+    public string FileName { get; init; } = "";
+    public string Url { get; init; } = "";
+    public string? ExpectedSha256 { get; init; }
+}
+
 public partial class SettingsWindow : Window
 {
+    private static readonly ModelSource VadSource = new()
+    {
+        Name = "Silero VAD",
+        FileName = "silero_vad.onnx",
+        Url = "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
+    };
+
+    private static readonly ModelSource AsrSource = new()
+    {
+        Name = "SenseVoice-Small ASR",
+        FileName = "sense-voice-small-q4_k.gguf",
+        Url = "https://huggingface.co/lovemefan/SenseVoiceGGUF/resolve/main/sense-voice-small-q4_k.gguf",
+    };
+
     private readonly DispatcherTimer _refreshTimer;
-    private readonly ModelManager _modelManager;
+    private readonly ModelManager _vadManager;
+    private readonly ModelManager _asrManager;
     private bool _updateCheckDone;
 
     public SettingsWindow()
@@ -26,54 +49,70 @@ public partial class SettingsWindow : Window
         _refreshTimer.Tick += (_, _) => OnRefreshProcesses(this, new RoutedEventArgs());
         _refreshTimer.Start();
 
-        // Model manager
-        _modelManager = new ModelManager("sense-voice-small-q4_k.gguf");
-        _modelManager.PropertyChanged += OnModelPropertyChanged;
-        RefreshModelStatus();
+        // VAD manager
+        _vadManager = new ModelManager(VadSource.FileName);
+        _vadManager.PropertyChanged += OnVadPropertyChanged;
+        RefreshVadStatus();
 
-        // Check for app updates on load (once)
+        // ASR manager
+        _asrManager = new ModelManager(AsrSource.FileName);
+        _asrManager.PropertyChanged += OnAsrPropertyChanged;
+        RefreshAsrStatus();
+
         _ = CheckForUpdatesAsync();
     }
 
-    private void RefreshModelStatus()
+    private void RefreshVadStatus()
     {
-        _modelManager.RefreshStatus();
-        ModelStatusText.Text = _modelManager.StatusMessage;
-        DownloadModelButton.IsEnabled = _modelManager.CanDownload;
-        ModelProgressBar.Visibility = Visibility.Collapsed;
+        _vadManager.RefreshStatus();
+        VadStatusText.Text = _vadManager.StatusMessage;
+        DownloadVadButton.IsEnabled = _vadManager.CanDownload;
+        VadProgressBar.Visibility = Visibility.Collapsed;
     }
 
-    private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void RefreshAsrStatus()
     {
-        Dispatcher.Invoke(() =>
-        {
-            ModelStatusText.Text = _modelManager.StatusMessage;
-            DownloadModelButton.IsEnabled = _modelManager.CanDownload;
-            ModelProgressBar.Visibility = _modelManager.IsBusy ? Visibility.Visible : Visibility.Collapsed;
-            if (_modelManager.IsBusy)
-                ModelProgressBar.Value = _modelManager.Progress;
-        });
+        _asrManager.RefreshStatus();
+        AsrStatusText.Text = _asrManager.StatusMessage;
+        DownloadAsrButton.IsEnabled = _asrManager.CanDownload;
+        AsrProgressBar.Visibility = Visibility.Collapsed;
     }
 
-    private async void OnDownloadModelClick(object sender, RoutedEventArgs e)
+    private void BindModelToUI(ModelManager mgr, TextBlock statusText, Button btn, ProgressBar bar)
     {
-        DownloadModelButton.IsEnabled = false;
+        statusText.Text = mgr.StatusMessage;
+        btn.IsEnabled = mgr.CanDownload;
+        bar.Visibility = mgr.IsBusy ? Visibility.Visible : Visibility.Collapsed;
+        if (mgr.IsBusy) bar.Value = mgr.Progress;
+    }
 
-        var sourceUrl = "https://huggingface.co/lovemefan/SenseVoiceGGUF/resolve/main/sense-voice-small-q4_k.gguf";
+    private void OnVadPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        Dispatcher.Invoke(() => BindModelToUI(_vadManager, VadStatusText, DownloadVadButton, VadProgressBar));
+    }
 
+    private void OnAsrPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        Dispatcher.Invoke(() => BindModelToUI(_asrManager, AsrStatusText, DownloadAsrButton, AsrProgressBar));
+    }
+
+    private async void OnDownloadVadClick(object sender, RoutedEventArgs e) =>
+        await DownloadModel(_vadManager, VadSource, VadProgressBar);
+
+    private async void OnDownloadAsrClick(object sender, RoutedEventArgs e) =>
+        await DownloadModel(_asrManager, AsrSource, AsrProgressBar);
+
+    private async Task DownloadModel(ModelManager mgr, ModelSource src, ProgressBar bar)
+    {
         var progress = new Progress<double>(pct =>
-        {
-            Dispatcher.Invoke(() => ModelProgressBar.Value = pct);
-        });
+            Dispatcher.Invoke(() => bar.Value = pct));
+        await mgr.DownloadAsync(src.Url, src.ExpectedSha256 ?? "", progress);
 
-        await _modelManager.DownloadAsync(sourceUrl, progress: progress);
-
-        if (_modelManager.IsInstalled)
+        if (mgr.IsInstalled && src == AsrSource)
         {
-            // Signal core to reload model path
-            var modelPath = System.IO.Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory, "sense-voice-small-q4_k.gguf");
-            Interop.AuraCoreBinding.SetAsrModelPath(modelPath);
+            var path = System.IO.Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, src.FileName);
+            Interop.AuraCoreBinding.SetAsrModelPath(path);
         }
     }
 
@@ -85,18 +124,26 @@ public partial class SettingsWindow : Window
         var result = await UpdateChecker.CheckAsync();
         Dispatcher.Invoke(() =>
         {
-            if (result.HasUpdate && result.Latest != null)
+            if (result.HasUpdate && result.Info != null)
             {
-                UpdateStatusText.Text = $"v{result.Latest.TagName.TrimStart('v')} available!";
-                CheckUpdateButton.Content = "Download";
+                var tag = result.Info.TargetFullRelease.Version;
+                UpdateStatusText.Text = $"v{tag} available!";
+                CheckUpdateButton.Content = "Download & Restart";
                 CheckUpdateButton.Click -= OnCheckUpdateClick;
                 CheckUpdateButton.Click += async (_, _) =>
                 {
-                    Process.Start(new ProcessStartInfo
+                    CheckUpdateButton.IsEnabled = false;
+                    UpdateStatusText.Text = "Downloading...";
+                    try
                     {
-                        FileName = result.Latest.HtmlUrl,
-                        UseShellExecute = true
-                    });
+                        await UpdateChecker.DownloadUpdateAsync(result.Info);
+                        UpdateChecker.ApplyAndRestart(result.Info);
+                    }
+                    catch (Exception ex)
+                    {
+                        UpdateStatusText.Text = $"Update failed: {ex.Message}";
+                        CheckUpdateButton.IsEnabled = true;
+                    }
                 };
             }
             else if (result.ErrorMessage != null)
@@ -115,8 +162,8 @@ public partial class SettingsWindow : Window
     {
         CheckUpdateButton.IsEnabled = false;
         UpdateStatusText.Text = "Checking...";
+        _updateCheckDone = false;
         await CheckForUpdatesAsync();
-        CheckUpdateButton.IsEnabled = true;
     }
 
     private void OnRefreshProcesses(object sender, RoutedEventArgs e)

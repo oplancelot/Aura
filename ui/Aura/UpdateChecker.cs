@@ -1,45 +1,28 @@
-using System.Net.Http;
+using System.Diagnostics;
 using System.Reflection;
-using System.Text.Json;
 using System.Windows;
+using Velopack;
 
 namespace Aura;
-
-public class ReleaseInfo
-{
-    public string TagName { get; set; } = "";
-    public string HtmlUrl { get; set; } = "";
-    public string Body { get; set; } = "";
-    public DateTime PublishedAt { get; set; }
-    public List<ReleaseAsset> Assets { get; set; } = [];
-}
-
-public class ReleaseAsset
-{
-    public string Name { get; set; } = "";
-    public string BrowserDownloadUrl { get; set; } = "";
-    public long Size { get; set; }
-}
 
 public class UpdateCheckResult
 {
     public bool HasUpdate { get; set; }
-    public ReleaseInfo? Latest { get; set; }
+    public UpdateInfo? Info { get; set; }
     public string CurrentVersion { get; set; } = "";
     public string? ErrorMessage { get; set; }
 }
 
 public static class UpdateChecker
 {
-    private static readonly string RepoOwner = "anomalyco";
-    private static readonly string RepoName = "aura";
-    private static readonly HttpClient Client = new()
-    {
-        Timeout = TimeSpan.FromSeconds(15)
-    };
+    private static readonly Velopack.Sources.GithubSource UpdateSource = new(
+        "https://github.com/oplancelot/Aura", "", false);
 
     public static string CurrentVersion =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
+    public static UpdateManager CreateManager()
+        => new(UpdateSource);
 
     public static async Task<UpdateCheckResult> CheckAsync()
     {
@@ -50,32 +33,11 @@ public static class UpdateChecker
 
         try
         {
-            var url = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd("Aura/1.0");
+            var mgr = CreateManager();
+            result.Info = await mgr.CheckForUpdatesAsync();
 
-            using var response = await Client.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
-            var release = JsonSerializer.Deserialize<ReleaseInfo>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            if (release == null || string.IsNullOrEmpty(release.TagName))
-                return result;
-
-            result.Latest = release;
-
-            var latestVer = release.TagName.TrimStart('v');
-            var currentVer = CurrentVersion;
-
-            if (Version.TryParse(latestVer, out var latest) &&
-                Version.TryParse(currentVer, out var current))
-            {
-                result.HasUpdate = latest > current;
-            }
+            if (result.Info != null)
+                result.HasUpdate = true;
         }
         catch (Exception ex)
         {
@@ -83,5 +45,17 @@ public static class UpdateChecker
         }
 
         return result;
+    }
+
+    public static async Task DownloadUpdateAsync(UpdateInfo info, Action<int>? progress = null)
+    {
+        var mgr = CreateManager();
+        await mgr.DownloadUpdatesAsync(info, progress);
+    }
+
+    public static void ApplyAndRestart(UpdateInfo info)
+    {
+        var mgr = CreateManager();
+        mgr.ApplyUpdatesAndRestart(info);
     }
 }

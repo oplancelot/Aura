@@ -1,12 +1,9 @@
 using System;
 using System.Windows;
+using Velopack;
 
 namespace Aura;
 
-/// <summary>
-/// WPF Application entry point.
-/// Initialises the Rust core pipeline, overlay renderer, and system tray.
-/// </summary>
 public partial class App : Application
 {
     private OverlayRenderer.TranslationOverlay? _overlay;
@@ -14,6 +11,11 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Velopack hooks (install, update, uninstall) — must run first
+        VelopackApp.Build()
+            .SetAutoApplyOnStartup(true)
+            .Run();
+
         base.OnStartup(e);
 
         // 1. Initialise the Rust core

@@ -218,6 +218,20 @@ VLC/浏览器播放音频
 
 ---
 
+## 8. 模型下载
+
+Aura 使用两个模型，下载地址：
+
+| 模型 | 文件 | 大小 | 下载地址 |
+|------|------|------|----------|
+| Silero VAD v4 | `silero_vad.onnx` | ~2.3 MB | `https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx` |
+| SenseVoice-Small (Q4_K) | `sense-voice-small-q4_k.gguf` | ~173 MB | `https://huggingface.co/lovemefan/SenseVoiceGGUF/resolve/main/sense-voice-small-q4_k.gguf` |
+
+- VAD 模型内置在 git 仓库 `assets/` 中，一般不需要手动下载。
+- ASR 模型太大，不会进入 git，首次启动时可在设置界面点击下载。下载进度条会在模型下载完成后自动消失。
+
+---
+
 ## 6. 调整参数
 
 ### VAD 阈值

@@ -45,3 +45,7 @@ core/LibriSpeech ASR corpus/
 
 # ── Generated feature files ──
 fbank_lfr_cmvn_feature.json
+
+# ── Release / packaging ──
+releases/
+*.nupkg
