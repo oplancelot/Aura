@@ -41,7 +41,7 @@ vpk pack `
     --packVersion $Version `
     --packDir $PublishDir `
     --mainExe "Aura.exe" `
-    --releaseDir $ReleaseDir
+    --outputDir $ReleaseDir
 
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 

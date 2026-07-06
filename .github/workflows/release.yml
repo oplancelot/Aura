@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = $env:GITHUB_REF_NAME -replace '^v'
-          vpk pack --packId Aura --packVersion $ver --packDir ui/Aura/publish --mainExe Aura.exe --releaseDir release-output
+          vpk pack --packId Aura --packVersion $ver --packDir ui/Aura/publish --mainExe Aura.exe --outputDir release-output
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
