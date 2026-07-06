@@ -29,7 +29,7 @@ public partial class SettingsWindow : Window
     {
         Name = "SenseVoice-Small ASR",
         FileName = "sense-voice-small-q4_k.gguf",
-        Url = "https://huggingface.co/lovemefan/SenseVoiceGGUF/resolve/main/sense-voice-small-q4_k.gguf",
+        Url = "https://github.com/oplancelot/Aura/releases/latest/download/sense-voice-small-q4_k.gguf",
     };
 
     private readonly DispatcherTimer _refreshTimer;
