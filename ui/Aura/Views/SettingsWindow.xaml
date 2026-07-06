@@ -28,7 +28,7 @@
         <!-- Title -->
         <StackPanel Grid.Row="0" Margin="0,0,0,24">
             <TextBlock Text="✨ Aura" FontSize="28" FontWeight="Bold" Foreground="#CBA6F7"/>
-            <TextBlock Text="Real-time Game Voice Translation" FontSize="13" Foreground="#6C7086"/>
+            <TextBlock Text="Real-time Game Voice Transcription" FontSize="13" Foreground="#6C7086"/>
         </StackPanel>
 
         <!-- Target Process -->
@@ -47,10 +47,10 @@
                        FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
-        <!-- Target Language -->
-        <StackPanel Grid.Row="2" Margin="0,0,0,16">
+        <!-- Target Language (cloud-only) -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,16" Opacity="0.5">
             <TextBlock Text="Translate To"/>
-            <ComboBox x:Name="TargetLangComboBox" Margin="0,4,0,0">
+            <ComboBox x:Name="TargetLangComboBox" Margin="0,4,0,0" IsEnabled="False">
                 <ComboBoxItem Content="中文 (Chinese)" IsSelected="True" Tag="zh"/>
                 <ComboBoxItem Content="English" Tag="en"/>
                 <ComboBoxItem Content="日本語 (Japanese)" Tag="ja"/>
@@ -59,25 +59,30 @@
                 <ComboBoxItem Content="Deutsch (German)" Tag="de"/>
                 <ComboBoxItem Content="Español (Spanish)" Tag="es"/>
             </ComboBox>
+            <TextBlock Text="Translation requires cloud engine — currently in local-only mode"
+                       FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
-        <!-- AI Engine / Model -->
+        <!-- Model -->
         <StackPanel Grid.Row="3" Margin="0,0,0,16">
             <TextBlock Text="Model"/>
             <ComboBox x:Name="EngineComboBox" Margin="0,4,0,0"
                       SelectionChanged="OnEngineChanged">
                 <ComboBoxItem Content="SenseVoice-Small (Local, offline)" IsSelected="True"/>
-                <ComboBoxItem Content="Gemini 2.5 Flash (Cloud)"/>
+                <ComboBoxItem Content="Gemini 2.5 Flash (Cloud)" IsEnabled="False"/>
             </ComboBox>
         </StackPanel>
 
-        <!-- API Key (only for cloud engines) -->
+        <!-- API Key (cloud engines only) -->
         <StackPanel x:Name="ApiKeyPanel" Grid.Row="4" Margin="0,0,0,16"
                     Visibility="Collapsed">
             <TextBlock Text="API Key"/>
             <TextBox x:Name="ApiKeyTextBox"
                      Margin="0,4,0,0"
-                     MaxLength="256"/>
+                     MaxLength="256"
+                     IsEnabled="False"/>
+            <TextBlock Text="Gemini engine not available in this build"
+                       FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
         <!-- Action Buttons -->

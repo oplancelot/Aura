@@ -79,18 +79,10 @@ public partial class SettingsWindow : Window
 
         var pid = (int)selectedProcess.Tag;
 
-        var engineName = EngineComboBox.SelectedIndex == 0 ? "sensevoice" : "gemini";
+        var engineName = "sensevoice";
         Interop.AuraCoreBinding.SetEngine(engineName);
 
-        if (!string.IsNullOrWhiteSpace(ApiKeyTextBox.Text))
-        {
-            Interop.AuraCoreBinding.SetApiKey(ApiKeyTextBox.Text);
-        }
-
-        if (TargetLangComboBox.SelectedItem is ComboBoxItem langItem && langItem.Tag is string lang)
-        {
-            Interop.AuraCoreBinding.SetTargetLang(lang);
-        }
+        // API key and target language are cloud-only — not used in local mode
 
         int result = Interop.AuraCoreBinding.Start((uint)pid);
         if (result == 0)
