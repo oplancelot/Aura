@@ -31,11 +31,6 @@ jobs:
       - name: Build Rust core
         run: cargo build --release
         working-directory: core
-        env:
-          AURA_CMAKE_GENERATOR: "Visual Studio 17 2022"
-          CMAKE_GENERATOR: "Visual Studio 17 2022"
-          CMAKE_GENERATOR_PLATFORM: x64
-          CMAKE_GENERATOR_TOOLSET: host=x64
 
       - name: Publish C# UI
         run: dotnet publish --no-self-contained -r win-x64 -o publish
