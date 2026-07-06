@@ -10,7 +10,7 @@
         Background="{DynamicResource MaterialDesignPaper}"
         FontFamily="{DynamicResource MaterialDesignFont}"
         Title="Aura Settings"
-        Width="500" Height="600"
+        Width="540" Height="700"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
 
@@ -19,21 +19,22 @@
             <RowDefinition Height="Auto"/>  <!-- Title -->
             <RowDefinition Height="Auto"/>  <!-- Target App -->
             <RowDefinition Height="Auto"/>  <!-- Translate To -->
+            <RowDefinition Height="Auto"/>  <!-- Engine -->
             <RowDefinition Height="Auto"/>  <!-- Model -->
-            <RowDefinition Height="Auto"/>  <!-- API Key (conditional) -->
+            <RowDefinition Height="Auto"/>  <!-- Update -->
             <RowDefinition Height="*"/>     <!-- Spacer -->
             <RowDefinition Height="Auto"/>  <!-- Buttons -->
         </Grid.RowDefinitions>
 
         <!-- Title -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,24">
-            <TextBlock Text="✨ Aura" FontSize="28" FontWeight="Bold" Foreground="#CBA6F7"/>
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="Aura" FontSize="28" FontWeight="Bold" Foreground="#CBA6F7"/>
             <TextBlock Text="Real-time Game Voice Transcription" FontSize="13" Foreground="#6C7086"/>
         </StackPanel>
 
         <!-- Target Process -->
-        <StackPanel Grid.Row="1" Margin="0,0,0,16">
-            <TextBlock Text="Target App"/>
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <TextBlock Text="Target App" FontWeight="SemiBold"/>
             <Grid Margin="0,4,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -47,25 +48,20 @@
                        FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
-        <!-- Target Language (cloud-only) -->
-        <StackPanel Grid.Row="2" Margin="0,0,0,16" Opacity="0.5">
-            <TextBlock Text="Translate To"/>
+        <!-- Language (cloud-only, disabled) -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,12" Opacity="0.5">
+            <TextBlock Text="Translate To" FontWeight="SemiBold"/>
             <ComboBox x:Name="TargetLangComboBox" Margin="0,4,0,0" IsEnabled="False">
-                <ComboBoxItem Content="中文 (Chinese)" IsSelected="True" Tag="zh"/>
+                <ComboBoxItem Content="Chinese" IsSelected="True" Tag="zh"/>
                 <ComboBoxItem Content="English" Tag="en"/>
-                <ComboBoxItem Content="日本語 (Japanese)" Tag="ja"/>
-                <ComboBoxItem Content="한국어 (Korean)" Tag="ko"/>
-                <ComboBoxItem Content="Français (French)" Tag="fr"/>
-                <ComboBoxItem Content="Deutsch (German)" Tag="de"/>
-                <ComboBoxItem Content="Español (Spanish)" Tag="es"/>
             </ComboBox>
-            <TextBlock Text="Translation requires cloud engine — currently in local-only mode"
+            <TextBlock Text="Cloud-only — currently local-only mode"
                        FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
         </StackPanel>
 
-        <!-- Model -->
-        <StackPanel Grid.Row="3" Margin="0,0,0,16">
-            <TextBlock Text="Model"/>
+        <!-- Engine -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,12">
+            <TextBlock Text="Engine" FontWeight="SemiBold"/>
             <ComboBox x:Name="EngineComboBox" Margin="0,4,0,0"
                       SelectionChanged="OnEngineChanged">
                 <ComboBoxItem Content="SenseVoice-Small (Local, offline)" IsSelected="True"/>
@@ -73,20 +69,62 @@
             </ComboBox>
         </StackPanel>
 
-        <!-- API Key (cloud engines only) -->
-        <StackPanel x:Name="ApiKeyPanel" Grid.Row="4" Margin="0,0,0,16"
-                    Visibility="Collapsed">
-            <TextBlock Text="API Key"/>
-            <TextBox x:Name="ApiKeyTextBox"
-                     Margin="0,4,0,0"
-                     MaxLength="256"
-                     IsEnabled="False"/>
-            <TextBlock Text="Gemini engine not available in this build"
-                       FontSize="11" Foreground="#6C7086" Margin="0,4,0,0"/>
+        <!-- Model download -->
+        <StackPanel Grid.Row="4" Margin="0,0,0,12">
+            <TextBlock Text="ASR Model" FontWeight="SemiBold"/>
+            <Border BorderBrush="{DynamicResource MaterialDesignDivider}"
+                    BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,6,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Status + download button -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock x:Name="ModelStatusText" Text="Checking..."
+                                   FontSize="12" Foreground="#6C7086"/>
+                        <ProgressBar x:Name="ModelProgressBar"
+                                     Margin="0,4,12,0" Height="4"
+                                     Minimum="0" Maximum="100"
+                                     Value="0" Visibility="Collapsed"/>
+                    </StackPanel>
+                    <Button x:Name="DownloadModelButton" Grid.Row="0" Grid.Column="1"
+                            Content="Download" Padding="16,4"
+                            Click="OnDownloadModelClick"
+                            VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+        </StackPanel>
+
+        <!-- Update check -->
+        <StackPanel Grid.Row="5" Margin="0,0,0,12">
+            <TextBlock Text="Updates" FontWeight="SemiBold"/>
+            <Border BorderBrush="{DynamicResource MaterialDesignDivider}"
+                    BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,6,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="UpdateStatusText" Grid.Column="0"
+                               Text="Check for new version..."
+                               FontSize="12" Foreground="#6C7086"
+                               VerticalAlignment="Center"/>
+                    <Button x:Name="CheckUpdateButton" Grid.Column="1"
+                            Content="Check" Padding="16,4"
+                            Click="OnCheckUpdateClick"
+                            VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
         </StackPanel>
 
         <!-- Action Buttons -->
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="StartButton" Content="▶ Start Translation" Click="OnStartClick"
                     Margin="0,0,12,0"/>
             <Button x:Name="StopButton" Content="⏹ Stop" Click="OnStopClick"
