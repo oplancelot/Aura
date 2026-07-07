@@ -21,23 +21,7 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // 1. Auto-download models if missing (LFS assets not bundled in binary update)
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        var models = new[]
-        {
-            ("silero_vad.onnx", "https://github.com/oplancelot/Aura/raw/main/assets/silero_vad.onnx"),
-            ("sense-voice-small-q4_k.gguf", "https://github.com/oplancelot/Aura/raw/main/assets/sense-voice-small-q4_k.gguf"),
-        };
-        foreach (var (file, url) in models)
-        {
-            var path = Path.Combine(baseDir, file);
-            if (!File.Exists(path))
-            {
-                _ = DownloadModelAsync(url, path);
-            }
-        }
-
-        // 2. Initialise the Rust core
+        // 1. Initialise the Rust core
         int result = Interop.AuraCoreBinding.Init();
         if (result != 0)
         {
@@ -47,12 +31,23 @@ public partial class App : Application
             return;
         }
 
-        // 3. Set model paths
-        var modelPath = Path.Combine(baseDir, "silero_vad.onnx");
-        Interop.AuraCoreBinding.SetModelPath(modelPath);
+        // 2. Set model paths (only if valid — LFS placeholder is ~1KB)
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-        var asrModelPath = Path.Combine(baseDir, "sense-voice-small-q4_k.gguf");
-        Interop.AuraCoreBinding.SetAsrModelPath(asrModelPath);
+        var vadPath = Path.Combine(baseDir, "silero_vad.onnx");
+        if (File.Exists(vadPath))
+            Interop.AuraCoreBinding.SetModelPath(vadPath);
+
+        var asrPath = Path.Combine(baseDir, "sense-voice-small-q4_k.gguf");
+        if (File.Exists(asrPath) && new FileInfo(asrPath).Length > 1024 * 1024)
+            Interop.AuraCoreBinding.SetAsrModelPath(asrPath);
+
+        // 3. Fire background download for missing models
+        _ = DownloadIfMissingAsync("silero_vad.onnx",
+            "https://github.com/oplancelot/Aura/raw/main/assets/silero_vad.onnx", baseDir);
+        _ = DownloadIfMissingAsync("sense-voice-small-q4_k.gguf",
+            "https://github.com/oplancelot/Aura/raw/main/assets/sense-voice-small-q4_k.gguf", baseDir,
+            onCompleted: p => Interop.AuraCoreBinding.SetAsrModelPath(p));
 
         // 4. Start the overlay renderer
         _overlay = new OverlayRenderer.TranslationOverlay();
@@ -66,20 +61,25 @@ public partial class App : Application
         _trayManager.Initialize();
     }
 
-    private static async Task DownloadModelAsync(string url, string destPath)
+    private static async Task DownloadIfMissingAsync(string fileName, string url, string baseDir,
+        Action<string>? onCompleted = null)
     {
+        var destPath = Path.Combine(baseDir, fileName);
+        if (File.Exists(destPath) && new FileInfo(destPath).Length > 1024 * 1024)
+            return;
+
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
             var response = await client.GetAsync(url);
             response.EnsureSuccessStatusCode();
-            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             using var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write);
             await response.Content.CopyToAsync(fs);
+            onCompleted?.Invoke(destPath);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Failed to download model:\n{ex.Message}",
+            MessageBox.Show($"Failed to download {fileName}:\n{ex.Message}",
                 "Aura", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
