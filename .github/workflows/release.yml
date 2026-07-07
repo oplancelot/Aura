@@ -17,7 +17,7 @@ jobs:
       CARGO_TERM_COLOR: always
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           lfs: true
@@ -28,7 +28,7 @@ jobs:
           target: x86_64-pc-windows-msvc
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
@@ -60,7 +60,7 @@ jobs:
           vpk pack --packId Aura --packVersion $ver --packDir ui/Aura/publish --mainExe Aura.exe --outputDir release-output
 
       - name: Upload Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release-output/*-Setup.exe
@@ -68,4 +68,3 @@ jobs:
             release-output/RELEASES
             release-output/*.nupkg
           generate_release_notes: true
-          allowUpdates: true
