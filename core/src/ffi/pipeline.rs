@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::ai::sensevoice::SenseVoiceEngine;
 use crate::audio::capture::{AudioCapturer, CaptureConfig};
 use crate::audio::ring_buffer::{AudioConsumer, audio_ring_buffer};
-use crate::vad::silero::SileroVad;
+use crate::vad::silero::{SileroVad, VadResult};
 use crate::vad::state_machine::{ChunkingConfig, ChunkingStateMachine, ChunkType};
 
 #[allow(dead_code)]
@@ -282,7 +282,16 @@ fn run_pipeline(
                     let frame: Vec<f32> =
                         frame_buffer.drain(..SileroVad::AUDIO_SAMPLES).collect();
 
-                    let vad_result = vad.process_frame(&frame)?;
+                    let vad_result = match vad.process_frame(&frame) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            log::error!("VAD inference failed, treating frame as silence: {:#}", e);
+                            VadResult {
+                                probability: 0.0,
+                                is_speech: false,
+                            }
+                        }
+                    };
 
                     // Diagnostic: log VAD probability and dump captured audio
                     if let Some(ref mut logger) = vad_logger {
