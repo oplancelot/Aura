@@ -77,8 +77,8 @@ fn main() {
                 chunk_buffer.extend_from_slice(&samples);
 
                 // Process every 512 samples
-                while chunk_buffer.len() >= SileroVad::FRAME_SAMPLES {
-                    let frame: Vec<f32> = chunk_buffer.drain(..SileroVad::FRAME_SAMPLES).collect();
+                while chunk_buffer.len() >= SileroVad::AUDIO_SAMPLES {
+                    let frame: Vec<f32> = chunk_buffer.drain(..SileroVad::AUDIO_SAMPLES).collect();
                     
                     for &s in &frame {
                         writer.write_sample(s).unwrap();
