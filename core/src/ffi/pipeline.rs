@@ -256,6 +256,14 @@ fn run_pipeline(
 
     let mut vad = SileroVad::new(model_path)
         .map_err(|e| anyhow::anyhow!("Failed to load VAD model '{}': {}", model_path, e))?;
+
+    // Warm-up: one silence frame to eliminate ONNX first-inference latency
+    let warmup_frame = vec![0.0f32; SileroVad::AUDIO_SAMPLES];
+    if let Err(e) = vad.process_frame(&warmup_frame) {
+        log::warn!("VAD warm-up inference failed (non-fatal): {:#}", e);
+    }
+    vad.reset_state();
+
     let mut state_machine = ChunkingStateMachine::new(ChunkingConfig::default());
     let mut frame_buffer: Vec<f32> = Vec::with_capacity(16_000 * 2);
     let pipeline_start = Instant::now();
