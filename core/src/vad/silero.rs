@@ -25,6 +25,8 @@ pub struct SileroVad {
     context: Vec<f32>,
     /// Hysteresis state: tracks whether we are currently in a speech segment.
     is_speaking: bool,
+    /// Pre-allocated input buffer for ONNX inference (576 samples).
+    model_input: Vec<f32>,
 }
 
 /// Result of a single VAD frame inference.
@@ -72,6 +74,7 @@ impl SileroVad {
             state: vec![0.0f32; 2 * 1 * 128],
             context: vec![0.0f32; CONTEXT_SAMPLES],
             is_speaking: false,
+            model_input: vec![0.0f32; Self::FRAME_SAMPLES],
         })
     }
 
@@ -95,12 +98,12 @@ impl SileroVad {
         );
 
         // Concatenate context (64 samples from previous frame) with new audio (512 samples)
-        let mut model_input = Vec::with_capacity(Self::FRAME_SAMPLES);
-        model_input.extend_from_slice(&self.context);
-        model_input.extend_from_slice(frame);
+        // into the pre-allocated input buffer
+        self.model_input[..CONTEXT_SAMPLES].copy_from_slice(&self.context);
+        self.model_input[CONTEXT_SAMPLES..].copy_from_slice(frame);
 
         let outputs = self.session.run(ort::inputs![
-            "input" => Tensor::from_array((vec![1, Self::FRAME_SAMPLES], model_input)).unwrap(),
+            "input" => Tensor::from_array((vec![1, Self::FRAME_SAMPLES], self.model_input.clone())).unwrap(),
             "sr" => Tensor::from_array((Vec::<i64>::new(), vec![Self::SAMPLE_RATE as i64])).unwrap(),
             "state" => Tensor::from_array((vec![2, 1, 128], self.state.clone())).unwrap(),
         ]).map_err(|e| anyhow::anyhow!("{e}"))?;
