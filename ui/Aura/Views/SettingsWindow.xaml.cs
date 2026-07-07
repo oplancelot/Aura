@@ -8,33 +8,9 @@ using System.Windows.Threading;
 
 namespace Aura.Views;
 
-public class ModelSource
-{
-    public string Name { get; init; } = "";
-    public string FileName { get; init; } = "";
-    public string Url { get; init; } = "";
-    public string? ExpectedSha256 { get; init; }
-}
-
 public partial class SettingsWindow : Window
 {
-    private static readonly ModelSource VadSource = new()
-    {
-        Name = "Silero VAD",
-        FileName = "silero_vad.onnx",
-        Url = "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
-    };
-
-    private static readonly ModelSource AsrSource = new()
-    {
-        Name = "SenseVoice-Small ASR",
-        FileName = "sense-voice-small-q4_k.gguf",
-        Url = "https://github.com/oplancelot/Aura/releases/latest/download/sense-voice-small-q4_k.gguf",
-    };
-
     private readonly DispatcherTimer _refreshTimer;
-    private readonly ModelManager _vadManager;
-    private readonly ModelManager _asrManager;
     private bool _updateCheckDone;
 
     public SettingsWindow()
@@ -49,71 +25,7 @@ public partial class SettingsWindow : Window
         _refreshTimer.Tick += (_, _) => OnRefreshProcesses(this, new RoutedEventArgs());
         _refreshTimer.Start();
 
-        // VAD manager
-        _vadManager = new ModelManager(VadSource.FileName);
-        _vadManager.PropertyChanged += OnVadPropertyChanged;
-        RefreshVadStatus();
-
-        // ASR manager
-        _asrManager = new ModelManager(AsrSource.FileName);
-        _asrManager.PropertyChanged += OnAsrPropertyChanged;
-        RefreshAsrStatus();
-
         _ = CheckForUpdatesAsync();
-    }
-
-    private void RefreshVadStatus()
-    {
-        _vadManager.RefreshStatus();
-        VadStatusText.Text = _vadManager.StatusMessage;
-        DownloadVadButton.IsEnabled = _vadManager.CanDownload;
-        VadProgressBar.Visibility = Visibility.Collapsed;
-    }
-
-    private void RefreshAsrStatus()
-    {
-        _asrManager.RefreshStatus();
-        AsrStatusText.Text = _asrManager.StatusMessage;
-        DownloadAsrButton.IsEnabled = _asrManager.CanDownload;
-        AsrProgressBar.Visibility = Visibility.Collapsed;
-    }
-
-    private void BindModelToUI(ModelManager mgr, TextBlock statusText, Button btn, ProgressBar bar)
-    {
-        statusText.Text = mgr.StatusMessage;
-        btn.IsEnabled = mgr.CanDownload;
-        bar.Visibility = mgr.IsBusy ? Visibility.Visible : Visibility.Collapsed;
-        if (mgr.IsBusy) bar.Value = mgr.Progress;
-    }
-
-    private void OnVadPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        Dispatcher.Invoke(() => BindModelToUI(_vadManager, VadStatusText, DownloadVadButton, VadProgressBar));
-    }
-
-    private void OnAsrPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        Dispatcher.Invoke(() => BindModelToUI(_asrManager, AsrStatusText, DownloadAsrButton, AsrProgressBar));
-    }
-
-    private async void OnDownloadVadClick(object sender, RoutedEventArgs e) =>
-        await DownloadModel(_vadManager, VadSource, VadProgressBar);
-
-    private async void OnDownloadAsrClick(object sender, RoutedEventArgs e) =>
-        await DownloadModel(_asrManager, AsrSource, AsrProgressBar);
-
-    private async Task DownloadModel(ModelManager mgr, ModelSource src, ProgressBar bar)
-    {
-        var progress = new Progress<double>(pct =>
-            Dispatcher.Invoke(() => bar.Value = pct));
-        await mgr.DownloadAsync(src.Url, src.ExpectedSha256 ?? "", progress);
-
-        if (mgr.IsInstalled && src == AsrSource)
-        {
-            var path = System.IO.Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory, src.FileName);
-            Interop.AuraCoreBinding.SetAsrModelPath(path);
-        }
     }
 
     private async Task CheckForUpdatesAsync()
@@ -196,7 +108,7 @@ public partial class SettingsWindow : Window
                 Content = $"{proc.ProcessName} (PID: {proc.Id})",
                 Tag = proc.Id
             });
-            if (proc.Id == prevPid) selectedIdx = i + 1; // +1 for Self Test
+            if (proc.Id == prevPid) selectedIdx = i + 1;
         }
 
         ProcessComboBox.SelectedIndex = selectedIdx;
@@ -204,7 +116,6 @@ public partial class SettingsWindow : Window
 
     private void OnEngineChanged(object sender, SelectionChangedEventArgs e)
     {
-        // cloud-only engine disabled — no-op in local-only mode
     }
 
     private void OnStartClick(object sender, RoutedEventArgs e)
@@ -220,8 +131,6 @@ public partial class SettingsWindow : Window
 
         var engineName = "sensevoice";
         Interop.AuraCoreBinding.SetEngine(engineName);
-
-        // API key and target language are cloud-only — not used in local mode
 
         int result = Interop.AuraCoreBinding.Start((uint)pid);
         if (result == 0)

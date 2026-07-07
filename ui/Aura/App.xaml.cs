@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
 using Velopack;
 
@@ -18,7 +21,17 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // 1. Initialise the Rust core
+        // 1. Auto-download ASR model if missing
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var ggufPath = Path.Combine(baseDir, "sense-voice-small-q4_k.gguf");
+        if (!File.Exists(ggufPath))
+        {
+            _ = DownloadModelAsync(
+                "https://github.com/oplancelot/Aura/raw/main/assets/sense-voice-small-q4_k.gguf",
+                ggufPath);
+        }
+
+        // 2. Initialise the Rust core
         int result = Interop.AuraCoreBinding.Init();
         if (result != 0)
         {
@@ -28,27 +41,41 @@ public partial class App : Application
             return;
         }
 
-        // 2. Set model paths (co-located with the DLL in the bin directory)
-        var modelPath = System.IO.Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "silero_vad.onnx");
+        // 3. Set model paths
+        var modelPath = Path.Combine(baseDir, "silero_vad.onnx");
         Interop.AuraCoreBinding.SetModelPath(modelPath);
 
-        var asrModelPath = System.IO.Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "sense-voice-small-q4_k.gguf");
+        var asrModelPath = Path.Combine(baseDir, "sense-voice-small-q4_k.gguf");
         Interop.AuraCoreBinding.SetAsrModelPath(asrModelPath);
 
-        // 3. Start the overlay renderer (transparent OSD window)
+        // 4. Start the overlay renderer
         _overlay = new OverlayRenderer.TranslationOverlay();
         _overlay.Start();
 
-        // 4. Register the translation callback
+        // 5. Register the translation callback
         Interop.AuraCoreBinding.RegisterCallback(_overlay.OnTranslationReceived);
 
-        // 5. Set up system tray icon
+        // 6. Set up system tray icon
         _trayManager = new WindowManager.TrayIconManager();
         _trayManager.Initialize();
+    }
+
+    private static async Task DownloadModelAsync(string url, string destPath)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+            var response = await client.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            using var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write);
+            await response.Content.CopyToAsync(fs);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to download model:\n{ex.Message}",
+                "Aura", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

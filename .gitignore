@@ -16,11 +16,10 @@ ui/**/.vs/
 *.swp
 *.swo
 
-# ── Models — download from original source, not in git ──
+# ── Models — managed via Git LFS in assets/ ──
 models/*.onnx
 models/*.ggml
 models/*.bin
-*.gguf
 !models/.gitkeep
 
 # ── OS ──

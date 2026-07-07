@@ -20,7 +20,6 @@
             <RowDefinition Height="Auto"/>  <!-- Target App -->
             <RowDefinition Height="Auto"/>  <!-- Translate To -->
             <RowDefinition Height="Auto"/>  <!-- Engine -->
-            <RowDefinition Height="Auto"/>  <!-- Model -->
             <RowDefinition Height="Auto"/>  <!-- Update -->
             <RowDefinition Height="*"/>     <!-- Spacer -->
             <RowDefinition Height="Auto"/>  <!-- Buttons -->
@@ -69,59 +68,8 @@
             </ComboBox>
         </StackPanel>
 
-        <!-- Models -->
-        <StackPanel Grid.Row="4" Margin="0,0,0,12">
-            <TextBlock Text="Models" FontWeight="SemiBold"/>
-            <Border BorderBrush="{DynamicResource MaterialDesignDivider}"
-                    BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,6,0,0">
-                <StackPanel>
-                    <!-- Silero VAD -->
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="Silero VAD" FontSize="12" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="VadStatusText" Text="..." FontSize="11" Foreground="#6C7086"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <ProgressBar x:Name="VadProgressBar" Width="120" Height="4"
-                                         Minimum="0" Maximum="100" Value="0"
-                                         Visibility="Collapsed"/>
-                            <Button x:Name="DownloadVadButton" Content="Download"
-                                    Padding="12,2" FontSize="11"
-                                    Click="OnDownloadVadClick"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <Separator Margin="0,4" Opacity="0.3"/>
-
-                    <!-- SenseVoice -->
-                    <Grid Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="SenseVoice-Small ASR" FontSize="12" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="AsrStatusText" Text="..." FontSize="11" Foreground="#6C7086"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <ProgressBar x:Name="AsrProgressBar" Width="120" Height="4"
-                                         Minimum="0" Maximum="100" Value="0"
-                                         Visibility="Collapsed"/>
-                            <Button x:Name="DownloadAsrButton" Content="Download"
-                                    Padding="12,2" FontSize="11"
-                                    Click="OnDownloadAsrClick"/>
-                        </StackPanel>
-                    </Grid>
-                </StackPanel>
-            </Border>
-        </StackPanel>
-
         <!-- Update check -->
-        <StackPanel Grid.Row="5" Margin="0,0,0,12">
+        <StackPanel Grid.Row="4" Margin="0,0,0,12">
             <TextBlock Text="Updates" FontWeight="SemiBold"/>
             <Border BorderBrush="{DynamicResource MaterialDesignDivider}"
                     BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,6,0,0">
@@ -143,7 +91,7 @@
         </StackPanel>
 
         <!-- Action Buttons -->
-        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="StartButton" Content="▶ Start Translation" Click="OnStartClick"
                     Margin="0,0,12,0"/>
             <Button x:Name="StopButton" Content="⏹ Stop" Click="OnStopClick"
