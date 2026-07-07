@@ -56,4 +56,4 @@ Model files (`silero_vad.onnx` in repo, `sense-voice-small-q4_k.gguf` downloaded
 
 ## License
 
-TBD
+[MIT](LICENSE)
