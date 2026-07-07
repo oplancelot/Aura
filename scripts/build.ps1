@@ -5,8 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $AssetsDir = Join-Path $RepoRoot "assets"
-$CoreReleaseDir = Join-Path $RepoRoot "core" "target" "release"
-$AuraProject = Join-Path $RepoRoot "ui" "Aura"
+$CoreReleaseDir = Join-Path (Join-Path (Join-Path $RepoRoot "core") "target") "release"
+$AuraProject = Join-Path (Join-Path $RepoRoot "ui") "Aura"
 $PublishDir = Join-Path $AuraProject "publish"
 
 Write-Host "[1/3] Building Rust core (release)..." -ForegroundColor Cyan

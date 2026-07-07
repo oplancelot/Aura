@@ -33,8 +33,8 @@ pub struct ChunkingConfig {
 impl Default for ChunkingConfig {
     fn default() -> Self {
         Self {
-            silence_close_ms: 400,
-            provisional_start_ms: 2000,
+            silence_close_ms: 200,
+            provisional_start_ms: 1000,
             provisional_interval_ms: 200,
             hard_cut_ms: 5_000,
             hard_cut_overlap_ms: 2000,

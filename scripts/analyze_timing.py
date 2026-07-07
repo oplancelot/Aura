@@ -1,6 +1,17 @@
 import csv
+import glob
+import os
+
+log_dir = r"D:\repo\aura\ui\Aura\publish\logs"
+csv_files = glob.glob(os.path.join(log_dir, "timing_*.csv"))
+if not csv_files:
+    print("No timing CSV files found.")
+    exit(1)
+latest_csv = max(csv_files, key=os.path.getctime)
+print(f"Analyzing {latest_csv}...\n")
+
 rows = []
-with open(r"D:\repo\aura\ui\Aura\publish\logs\timing_20260707_042921.csv") as f:
+with open(latest_csv) as f:
     reader = csv.DictReader(f)
     for r in reader:
         r['asr_ms'] = int(r['asr_ms'])
