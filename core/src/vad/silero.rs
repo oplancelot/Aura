@@ -27,6 +27,8 @@ pub struct SileroVad {
     is_speaking: bool,
     /// Pre-allocated input buffer for ONNX inference (576 samples).
     model_input: Vec<f32>,
+    /// Recent frame speech probabilities for smoothing (ring buffer, last N frames).
+    prob_history: Vec<f32>,
 }
 
 /// Result of a single VAD frame inference.
@@ -40,6 +42,9 @@ pub struct VadResult {
 
 /// Context size: the v4 model prepends 64 context samples from the previous frame.
 const CONTEXT_SAMPLES: usize = 64;
+
+/// Number of frames for VAD probability smoothing.
+const SMOOTHING_FRAMES: usize = 3;
 
 impl SileroVad {
     /// Total samples passed to the ONNX model per frame (64 context + 512 audio).
@@ -75,6 +80,7 @@ impl SileroVad {
             context: vec![0.0f32; CONTEXT_SAMPLES],
             is_speaking: false,
             model_input: vec![0.0f32; Self::FRAME_SAMPLES],
+            prob_history: Vec::with_capacity(SMOOTHING_FRAMES),
         })
     }
 
@@ -118,11 +124,18 @@ impl SileroVad {
         // Update context: last 64 samples of current frame become next frame's context
         self.context.copy_from_slice(&frame[frame.len() - CONTEXT_SAMPLES..]);
 
+        // Smooth probability over recent frames to reduce single-frame noise
+        self.prob_history.push(probability);
+        if self.prob_history.len() > SMOOTHING_FRAMES {
+            self.prob_history.remove(0);
+        }
+        let smoothed_prob = self.prob_history.iter().sum::<f32>() / self.prob_history.len() as f32;
+
         // Hysteresis: use different thresholds for onset vs. offset
         let is_speech = if self.is_speaking {
-            probability > Self::THRESHOLD_OFF
+            smoothed_prob > Self::THRESHOLD_OFF
         } else {
-            probability > Self::THRESHOLD_ON
+            smoothed_prob > Self::THRESHOLD_ON
         };
         self.is_speaking = is_speech;
 
@@ -137,6 +150,7 @@ impl SileroVad {
         self.state.fill(0.0);
         self.context.fill(0.0);
         self.is_speaking = false;
+        self.prob_history.clear();
     }
 }
 
