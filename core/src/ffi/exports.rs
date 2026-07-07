@@ -3,8 +3,23 @@ use std::sync::{Mutex, OnceLock};
 
 use super::pipeline::PipelineState;
 
-pub type TranslationCallback =
-    unsafe extern "C" fn(text: *const c_char, is_provisional: c_int, latency_ms: c_int);
+/// Per-chunk timing metrics passed through FFI to C# for unified CSV logging.
+/// Zero I/O on the Rust hot path — metrics are computed from Instant deltas
+/// and shipped in-band alongside the translation text.
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct TranslationMetrics {
+    pub audio_duration_ms: u32,  // length of the audio chunk in ms
+    pub asr_inference_ms: u32,   // [T5] pure ASR inference time
+    pub rust_total_ms: u32,      // [T4→T6] chunk ready → callback
+}
+
+pub type TranslationCallback = unsafe extern "C" fn(
+    text: *const c_char,
+    is_provisional: c_int,
+    latency_ms: c_int,
+    metrics: TranslationMetrics,
+);
 
 static CALLBACK: OnceLock<Mutex<Option<TranslationCallback>>> = OnceLock::new();
 static MODEL_PATH: OnceLock<Mutex<String>> = OnceLock::new();
@@ -27,7 +42,7 @@ fn pipeline_slot() -> &'static Mutex<Option<PipelineState>> {
     PIPELINE.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn emit_translation(text: &str, is_provisional: bool, latency_ms: i32) {
+pub(crate) fn emit_translation(text: &str, is_provisional: bool, latency_ms: i32, metrics: TranslationMetrics) {
     let callback = callback_slot().lock().ok().and_then(|slot| *slot);
     let Some(callback) = callback else {
         return;
@@ -43,6 +58,7 @@ pub(crate) fn emit_translation(text: &str, is_provisional: bool, latency_ms: i32
             c_text.as_ptr(),
             if is_provisional { 1 } else { 0 },
             latency_ms,
+            metrics,
         );
     }
 }

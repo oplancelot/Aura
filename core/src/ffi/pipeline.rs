@@ -138,12 +138,13 @@ fn run_self_test(stop_signal: Arc<AtomicBool>) {
         let total = chars.len();
         let mut pos = 0;
         let step = 2;
+        let default_metrics = super::exports::TranslationMetrics::default();
         while pos < total {
             if stop_signal.load(Ordering::SeqCst) { break; }
             let end = (pos + step).min(total);
             let partial: String = chars[..end].iter().collect();
             let latency = (end as i32) * 10;
-            super::exports::emit_translation(&partial, true, latency);
+            super::exports::emit_translation(&partial, true, latency, default_metrics);
             pos = end;
             thread::sleep(Duration::from_millis(30));
         }
@@ -152,7 +153,7 @@ fn run_self_test(stop_signal: Arc<AtomicBool>) {
 
         // Final — full sentence, committed
         let ms = (total as i32) * 10 + 50;
-        super::exports::emit_translation(phrase, false, ms);
+        super::exports::emit_translation(phrase, false, ms, default_metrics);
 
         // Pause to let user read the complete sentence
         for _ in 0..24 {
@@ -282,19 +283,26 @@ fn run_pipeline(
                     capture_dumper.feed(&frame);
 
                     if let Some(chunk) = state_machine.feed(&vad_result, &frame) {
+                        let t_chunk_ready = Instant::now();
                         let duration_ms =
                             (chunk.samples.len() as u64 * 1000) / 16_000;
                         let latency = pipeline_start.elapsed().as_millis() as i32;
 
-                        let (text, is_provisional) = match chunk.chunk_type {
+                        let (text, is_provisional, asr_inference_ms) = match chunk.chunk_type {
                             ChunkType::Provisional => {
-                                (format!("[~] {}ms speech...", duration_ms), true)
+                                let metrics = super::exports::TranslationMetrics {
+                                    audio_duration_ms: duration_ms as u32,
+                                    asr_inference_ms: 0,
+                                    rust_total_ms: 0,
+                                };
+                                (format!("[~] {}ms speech...", duration_ms), true, metrics)
                             }
                             ChunkType::Final | ChunkType::HardCut => {
                                 // Reset VAD RNN state between utterances to
                                 // prevent hidden state leakage across segments
                                 vad.reset_state();
-                                if let Some(ref sv) = sense_voice {
+                                let t_asr_start = Instant::now();
+                                let result = if let Some(ref sv) = sense_voice {
                                     match sv.transcribe(&chunk.samples) {
                                         Ok(asr_text) if !asr_text.is_empty() => {
                                             (asr_text, false)
@@ -309,11 +317,21 @@ fn run_pipeline(
                                     }
                                 } else {
                                     (format!("[✓] {}ms sentence", duration_ms), false)
-                                }
+                                };
+                                let t_asr_end = Instant::now();
+                                let t_callback = Instant::now();
+                                let asr_ms = t_asr_end.duration_since(t_asr_start).as_millis() as u32;
+                                let total_ms = t_callback.duration_since(t_chunk_ready).as_millis() as u32;
+                                let metrics = super::exports::TranslationMetrics {
+                                    audio_duration_ms: duration_ms as u32,
+                                    asr_inference_ms: asr_ms,
+                                    rust_total_ms: total_ms,
+                                };
+                                (result.0, result.1, metrics)
                             }
                         };
 
-                        super::exports::emit_translation(&text, is_provisional, latency);
+                        super::exports::emit_translation(&text, is_provisional, latency, asr_inference_ms);
                     }
                 }
             }
@@ -325,7 +343,8 @@ fn run_pipeline(
     if !frame_buffer.is_empty() {
         let duration_ms = (frame_buffer.len() as u64 * 1000) / 16_000;
         let text = format!("[✓] {}ms (flush)", duration_ms);
-        super::exports::emit_translation(&text, false, 0);
+        let metrics = super::exports::TranslationMetrics::default();
+        super::exports::emit_translation(&text, false, 0, metrics);
     }
 
     log::info!("Pipeline worker stopped");

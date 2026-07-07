@@ -12,17 +12,30 @@ public static class AuraCoreBinding
 {
     private const string DllName = "aura_core";
 
-    // ── Callback delegate (must match Rust's TranslationCallback signature) ──
+    // ── Callback delegate & metrics (must match Rust TranslationCallback/TranslationMetrics) ──
+
+    /// <summary>
+    /// Per-chunk timing passed in-band through the FFI callback.
+    /// All fields computed on Rust side from Instant deltas — zero I/O on audio thread.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TranslationMetrics
+    {
+        public uint AudioDurationMs;   // length of the audio chunk in ms
+        public uint AsrInferenceMs;    // [T5] pure ASR inference time
+        public uint RustTotalMs;       // [T4→T6] chunk ready → callback
+    }
 
     /// <summary>
     /// Delegate matching the Rust FFI callback:
-    ///   fn(text: *const c_char, is_provisional: c_int, latency_ms: c_int)
+    ///   fn(text: *const c_char, is_provisional: c_int, latency_ms: c_int, metrics: TranslationMetrics)
     /// </summary>
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void TranslationCallbackDelegate(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
         int isProvisional,
-        int latencyMs);
+        int latencyMs,
+        TranslationMetrics metrics);
 
     // Keep a reference to prevent GC collection of the delegate
     private static TranslationCallbackDelegate? _pinnedCallback;
