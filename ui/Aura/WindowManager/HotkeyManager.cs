@@ -34,9 +34,10 @@ public class HotkeyManager : IDisposable
 
         if (!success)
         {
-            throw new InvalidOperationException(
+            System.Diagnostics.Debug.WriteLine(
                 "Failed to register global hotkey Ctrl+Shift+L. " +
                 "Another application may have claimed it.");
+            return;
         }
 
         // Hook into the Win32 message loop
@@ -56,7 +57,13 @@ public class HotkeyManager : IDisposable
 
     public void Dispose()
     {
-        _source?.RemoveHook(WndProc);
-        Interop.NativeMethods.UnregisterHotKey(_hwnd, HOTKEY_ID);
+        if (_source != null)
+        {
+            _source.RemoveHook(WndProc);
+        }
+        if (_hwnd != IntPtr.Zero)
+        {
+            Interop.NativeMethods.UnregisterHotKey(_hwnd, HOTKEY_ID);
+        }
     }
 }
