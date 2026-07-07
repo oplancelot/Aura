@@ -21,14 +21,20 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // 1. Auto-download ASR model if missing
+        // 1. Auto-download models if missing (LFS assets not bundled in binary update)
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        var ggufPath = Path.Combine(baseDir, "sense-voice-small-q4_k.gguf");
-        if (!File.Exists(ggufPath))
+        var models = new[]
         {
-            _ = DownloadModelAsync(
-                "https://github.com/oplancelot/Aura/raw/main/assets/sense-voice-small-q4_k.gguf",
-                ggufPath);
+            ("silero_vad.onnx", "https://github.com/oplancelot/Aura/raw/main/assets/silero_vad.onnx"),
+            ("sense-voice-small-q4_k.gguf", "https://github.com/oplancelot/Aura/raw/main/assets/sense-voice-small-q4_k.gguf"),
+        };
+        foreach (var (file, url) in models)
+        {
+            var path = Path.Combine(baseDir, file);
+            if (!File.Exists(path))
+            {
+                _ = DownloadModelAsync(url, path);
+            }
         }
 
         // 2. Initialise the Rust core
