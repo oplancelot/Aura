@@ -58,11 +58,6 @@ jobs:
           $ver = $env:GITHUB_REF_NAME -replace '^v'
           vpk pack --packId Aura --packVersion $ver --packDir ui/Aura/publish --mainExe Aura.exe --outputDir release-output
 
-      - name: Stage model assets for release
-        shell: pwsh
-        run: |
-          Copy-Item assets/silero_vad.onnx release-output/
-
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
@@ -71,5 +66,4 @@ jobs:
             release-output/*-Portable.zip
             release-output/RELEASES
             release-output/*.nupkg
-            release-output/silero_vad.onnx
           generate_release_notes: true
