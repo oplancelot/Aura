@@ -11,7 +11,10 @@
 
 use std::time::{Duration, Instant};
 
-use super::silero::VadResult;
+use super::silero::{SileroVad, VadResult};
+
+/// Duration of one audio frame in milliseconds, derived from VAD constants.
+const FRAME_DURATION_MS: u64 = SileroVad::AUDIO_SAMPLES as u64 * 1000 / SileroVad::SAMPLE_RATE as u64;
 
 // ── Configuration ──────────────────────────────────────────────────────
 
@@ -130,7 +133,7 @@ impl ChunkingStateMachine {
 
                 if !vad.is_speech {
                     self.silence_frame_count += 1;
-                    let silence_ms = self.silence_frame_count as u64 * 32; // 32ms per frame
+                    let silence_ms = self.silence_frame_count as u64 * FRAME_DURATION_MS;
                     if silence_ms >= self.config.silence_close_ms {
                         return Some(self.emit_final());
                     }
@@ -161,7 +164,7 @@ impl ChunkingStateMachine {
 
                 if !vad.is_speech {
                     self.silence_frame_count += 1;
-                    let silence_ms = self.silence_frame_count as u64 * 32;
+                    let silence_ms = self.silence_frame_count as u64 * FRAME_DURATION_MS;
                     if silence_ms >= self.config.silence_close_ms {
                         return Some(self.emit_final());
                     }
