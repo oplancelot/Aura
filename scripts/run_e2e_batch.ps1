@@ -13,7 +13,7 @@ $example = "core\target\release\examples\e2e_transcribe_wav.exe"
 # Build once
 Write-Host "Building e2e_transcribe_wav..."
 Push-Location core
-cargo build --release --example e2e_transcribe_wav 2>&1 | Out-Null
+cargo build --release --example e2e_transcribe_wav 2>&1
 Pop-Location
 
 if (-not (Test-Path $example)) {
@@ -35,7 +35,6 @@ $totalChunks = 0
 $totalFinal = 0
 $totalHardCut = 0
 $totalProvisional = 0
-$chunkDurationList = @()
 $multiChunkFiles = 0
 $tested = 0
 
@@ -45,7 +44,7 @@ foreach ($wav in $wavs) {
     $name = $wav.BaseName
     Write-Progress -Activity "E2E Testing" -Status "$name ($tested/$totalCount)" -PercentComplete (($tested / $totalCount) * 100)
 
-    $output = & $example $wav.FullName 2>$null
+    $output = & $example $wav.FullName 2>&1
 
     $wer = $null
     $asrMs = 0.0
