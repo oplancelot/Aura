@@ -108,13 +108,11 @@ fn main() {
     let mut final_count = 0u32;
     let mut hardcut_count = 0u32;
     let mut provisional_count = 0u32;
-    let mut flush_used = false;
-
     let start = Instant::now();
 
     println!("\n--- Utterance breakdown ---");
 
-    while pos + SileroVad::AUDIO_SAMPLES <= pcm_len && chunk_index < 100 {
+    while pos + SileroVad::AUDIO_SAMPLES <= pcm_len && chunk_index < 10000 {
         let frame = &pcm[pos..pos + SileroVad::AUDIO_SAMPLES];
         let vad_result = vad.process_frame(frame)
             .expect("VAD inference failed");
@@ -133,43 +131,11 @@ fn main() {
                 }
                 ChunkType::Final => {
                     final_count += 1;
-                    let t0 = Instant::now();
-                    match sv.transcribe(&chunk.samples) {
-                        Ok(text) if !text.is_empty() => {
-                            let elapsed = t0.elapsed();
-                            total_asr_ms += elapsed.as_millis() as u64;
-                            if !e2e_text.is_empty() { e2e_text.push(' '); }
-                            e2e_text.push_str(&text);
-                            println!("#{chunk_index:4}  Final        {chunk_sec:6.1}s chunk  {:>3}ms ASR  \"{}\"", elapsed.as_millis(), text);
-                        }
-                        Ok(_) => {
-                            println!("#{chunk_index:4}  Final        {chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
-                        }
-                        Err(e) => {
-                            println!("#{chunk_index:4}  Final        {chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
-                        }
-                    }
-                    vad.reset_state();
+                    asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
                 }
                 ChunkType::HardCut => {
                     hardcut_count += 1;
-                    let t0 = Instant::now();
-                    match sv.transcribe(&chunk.samples) {
-                        Ok(text) if !text.is_empty() => {
-                            let elapsed = t0.elapsed();
-                            total_asr_ms += elapsed.as_millis() as u64;
-                            if !e2e_text.is_empty() { e2e_text.push(' '); }
-                            e2e_text.push_str(&text);
-                            println!("#{chunk_index:4}  HardCut      {chunk_sec:6.1}s chunk  {:>3}ms ASR  \"{}\"", elapsed.as_millis(), text);
-                        }
-                        Ok(_) => {
-                            println!("#{chunk_index:4}  HardCut      {chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
-                        }
-                        Err(e) => {
-                            println!("#{chunk_index:4}  HardCut      {chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
-                        }
-                    }
-                    vad.reset_state();
+                    asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
                 }
             }
         }
@@ -181,28 +147,12 @@ fn main() {
     if pos < pcm_len {
         let remaining = &pcm[pos..];
         if remaining.len() >= 16000 { // at least 1 second
-            flush_used = true;
             chunk_index += 1;
             let chunk_sec = remaining.len() as f64 / 16000.0;
             chunk_durations.push(chunk_sec);
             final_count += 1;
 
-            let t0 = Instant::now();
-            match sv.transcribe(remaining) {
-                Ok(text) if !text.is_empty() => {
-                    let elapsed = t0.elapsed();
-                    total_asr_ms += elapsed.as_millis() as u64;
-                    if !e2e_text.is_empty() { e2e_text.push(' '); }
-                    e2e_text.push_str(&text);
-                    println!("#{chunk_index:4}  Final(flush){chunk_sec:6.1}s chunk  {:>3}ms ASR  \"{}\"", elapsed.as_millis(), text);
-                }
-                Ok(_) => {
-                    println!("#{chunk_index:4}  Final(flush){chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
-                }
-                Err(e) => {
-                    println!("#{chunk_index:4}  Final(flush){chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
-                }
-            }
+            asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", remaining, chunk_sec, &mut e2e_text, &mut total_asr_ms);
         }
     }
 
@@ -235,13 +185,39 @@ fn main() {
     println!("\n=== Segmentation Quality ===");
     println!("Total chunks: {}  (Final: {}, HardCut: {}, Provisional: {})",
         total_chunks, final_count, hardcut_count, provisional_count);
-    if flush_used {
-        println!("  (includes 1 flush chunk)");
-    }
     if !chunk_durations.is_empty() {
         println!("Avg chunk: {:.1}s  |  Min: {:.1}s  |  Max: {:.1}s",
             avg_chunk, min_chunk, max_chunk);
     }
+}
+
+fn asr_and_log(
+    sv: &SenseVoiceEngine,
+    vad: &mut SileroVad,
+    chunk_index: u32,
+    label: &str,
+    samples: &[f32],
+    chunk_sec: f64,
+    e2e_text: &mut String,
+    total_asr_ms: &mut u64,
+) {
+    let t0 = Instant::now();
+    match sv.transcribe(samples) {
+        Ok(text) if !text.is_empty() => {
+            let elapsed = t0.elapsed();
+            *total_asr_ms += elapsed.as_millis() as u64;
+            if !e2e_text.is_empty() { e2e_text.push(' '); }
+            e2e_text.push_str(&text);
+            println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk  {:>3}ms ASR  \"{}\"", elapsed.as_millis(), text);
+        }
+        Ok(_) => {
+            println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
+        }
+        Err(e) => {
+            println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
+        }
+    }
+    vad.reset_state();
 }
 
 fn preview_text(samples: &[f32], _max_chars: usize) -> String {
