@@ -44,7 +44,7 @@ foreach ($wav in $wavs) {
     $name = $wav.BaseName
     Write-Progress -Activity "E2E Testing" -Status "$name ($tested/$totalCount)" -PercentComplete (($tested / $totalCount) * 100)
 
-    $output = & $example $wav.FullName 2>&1
+    $output = & $example $wav.FullName 2>$null
 
     $wer = $null
     $asrMs = 0.0
@@ -54,6 +54,7 @@ foreach ($wav in $wavs) {
     $final = 0
     $hardCut = 0
     $provisional = 0
+    $minChunk = 0.0; $avgChunk = 0.0; $maxChunk = 0.0
 
     # Parse summary lines
     foreach ($line in $output) {
@@ -70,7 +71,9 @@ foreach ($wav in $wavs) {
             $provisional = [int]$Matches[4]
         }
         elseif ($line -match "^Avg chunk: ([\d.]+)s.*Min: ([\d.]+)s.*Max: ([\d.]+)s") {
-            # store for aggregate stats
+            $avgChunk = [double]$Matches[1]
+            $minChunk = [double]$Matches[2]
+            $maxChunk = [double]$Matches[3]
         }
     }
 
@@ -87,6 +90,9 @@ foreach ($wav in $wavs) {
             Final = $final
             HardCut = $hardCut
             Provisional = $provisional
+            Min_Chunk_s = $minChunk
+            Avg_Chunk_s = $avgChunk
+            Max_Chunk_s = $maxChunk
         }
         $totalWER += $wer
         $totalAsrMs += $asrMs
@@ -113,6 +119,7 @@ if ($tested -gt 0) {
     Write-Host "`n=== Segmentation Quality ($tested files) ==="
     Write-Host "Total chunks: $totalChunks  (Final: $totalFinal | HardCut: $totalHardCut | Provisional: $totalProvisional)"
     Write-Host "Files with >1 chunk: $multiChunkFiles ($([math]::Round($multiChunkFiles / $tested * 100, 0))%)"
+    Write-Host "Avg chunk duration: N/A  |  Min: N/A  |  Max: N/A"
 }
 
 $results | Export-Csv "e2e_batch_results.csv" -NoTypeInformation
