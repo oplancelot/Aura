@@ -11,13 +11,22 @@ fn main() {
         .init();
 
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <wav_path>", args[0]);
+    // Default is Accuracy mode (no per-frame sleep). Pass --realtime to
+    // simulate ~16ms frame pacing for latency-oriented runs.
+    let realtime = args.iter().any(|a| a == "--realtime");
+    let wav_path = args.iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .map(|s| s.as_str());
+    let Some(wav_path) = wav_path else {
+        eprintln!("Usage: {} <wav_path> [--realtime]", args[0]);
+        eprintln!("  default: Accuracy mode (fast, no frame sleep)");
+        eprintln!("  --realtime: sleep ~16ms per VAD frame (simulates live capture)");
         std::process::exit(1);
-    }
-
-    let wav_path = &args[1];
+    };
     let wav_file = Path::new(wav_path);
+    let mode_name = if realtime { "realtime" } else { "accuracy" };
+    println!("Mode: {mode_name}");
 
     // Auto-extract reference text from metadata.csv or .trans.txt
     let reference = extract_reference(wav_file);
@@ -116,7 +125,10 @@ fn main() {
         let frame = &pcm[pos..pos + SileroVad::AUDIO_SAMPLES];
         let vad_result = vad.process_frame(frame)
             .expect("VAD inference failed");
-        std::thread::sleep(Duration::from_millis(16)); // simulate real-time frame interval
+        if realtime {
+            // Simulate real-time frame interval (~32ms audio @ 16kHz / ~16ms wall pacing)
+            std::thread::sleep(Duration::from_millis(16));
+        }
 
         if let Some(chunk) = state_machine.feed(&vad_result, frame) {
             chunk_index += 1;
@@ -147,7 +159,9 @@ fn main() {
     // Flush: feed silence frames to flush any in-progress utterance
     let silence_frame = vec![0.0f32; SileroVad::AUDIO_SAMPLES];
     for _ in 0..20 {
-        std::thread::sleep(Duration::from_millis(16));
+        if realtime {
+            std::thread::sleep(Duration::from_millis(16));
+        }
         let Ok(silence_result) = vad.process_frame(&silence_frame) else { break };
         if let Some(chunk) = state_machine.feed(&silence_result, &silence_frame) {
             match chunk.chunk_type {
