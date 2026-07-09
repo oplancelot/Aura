@@ -91,6 +91,20 @@ public partial class SettingsWindow : Window
         });
 
         var appPids = Interop.NativeMethods.GetVisibleAppPids();
+        appPids.Remove((uint)Environment.ProcessId);
+
+        var blocklist = new[] { "Taskmgr", "explorer", "SystemSettings", "SearchApp",
+                                "TextInputHost", "ShellExperienceHost", "LockApp",
+                                "PeopleExperienceHost", "StartMenuExperienceHost" };
+        appPids.RemoveWhere(pid =>
+        {
+            try { using var p = Process.GetProcessById((int)pid); return blocklist.Contains(p.ProcessName); }
+            catch { return false; }
+        });
+
+        var audioPids = Interop.AudioSessionEnumerator.GetPidsWithAudio();
+        if (audioPids != null && audioPids.Count > 0)
+            appPids.IntersectWith(audioPids);
 
         var processes = Process.GetProcesses()
             .Where(p => p.Id > 0 && appPids.Contains((uint)p.Id))
