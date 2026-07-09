@@ -10,7 +10,8 @@ param(
     [ValidateSet("Accuracy", "Latency")]
     [string]$Suite = "Accuracy",
     [int]$SilenceClose = 0,  # override silence_close_ms (0 = leave default)
-    [int]$HardCut = 0        # override hard_cut_ms (0 = leave default)
+    [int]$HardCut = 0,       # override hard_cut_ms (0 = leave default)
+    [int]$Threads = 0        # override ASR thread count (0 = leave default 4)
 )
 
 if ($Suite -eq "Latency") { $Realtime = $true }
@@ -114,6 +115,7 @@ foreach ($wav in $wavs) {
     if ($Realtime) { $cmdline += "--realtime" }
     if ($SilenceClose -gt 0) { $cmdline += "--silence-close"; $cmdline += "$SilenceClose" }
     if ($HardCut -gt 0) { $cmdline += "--hard-cut"; $cmdline += "$HardCut" }
+    if ($Threads -gt 0) { $cmdline += "--threads"; $cmdline += "$Threads" }
     $output = & $example $cmdline 2>$null
 
     $wer = $null

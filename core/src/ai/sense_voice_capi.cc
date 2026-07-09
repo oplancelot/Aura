@@ -28,9 +28,11 @@ void* aura_sense_voice_load(const char* model_path, int use_gpu) {
 
 int aura_sense_voice_transcribe(void* handle_ptr, const float* pcm_data,
                                  int num_samples, char* out_text,
-                                 int max_text_len) {
+                                 int max_text_len, int n_threads) {
     auto* handle = static_cast<SenseVoiceHandle*>(handle_ptr);
     if (!handle || !handle->ctx) return -1;
+
+    if (n_threads <= 0) n_threads = 4;
 
     // Convert f32 PCM [-1.0, 1.0] to int16 range [-32768, 32768] as double.
     // SenseVoice model was trained on int16 WAV data without normalization
@@ -42,7 +44,7 @@ int aura_sense_voice_transcribe(void* handle_ptr, const float* pcm_data,
 
     sense_voice_full_params wparams = sense_voice_full_default_params(
         SENSE_VOICE_SAMPLING_GREEDY);
-    wparams.n_threads = 4;
+    wparams.n_threads = n_threads;
     wparams.language = "auto";
 
     handle->ctx->state->duration =

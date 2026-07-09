@@ -36,12 +36,18 @@ fn main() {
     }
     let silence_close = parse_arg(&args, "--silence-close").unwrap_or(200);
     let hard_cut = parse_arg(&args, "--hard-cut").unwrap_or(5000);
+    let num_threads = args.iter()
+        .position(|a| a == "--threads")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
     let config = ChunkingConfig {
         silence_close_ms: silence_close,
         hard_cut_ms: hard_cut,
         ..ChunkingConfig::default()
     };
-    println!("Config: silence_close={silence_close}ms  hard_cut={hard_cut}ms");
+    println!("Config: silence_close={silence_close}ms  hard_cut={hard_cut}ms  threads={}",
+        if num_threads <= 0 { 4 } else { num_threads });
 
     // Auto-extract reference text from metadata.csv or .trans.txt
     let reference = extract_reference(wav_file);
@@ -118,7 +124,7 @@ fn main() {
     vad.reset_state();
 
     let mut state_machine = ChunkingStateMachine::new(config);
-    let sv = SenseVoiceEngine::new(asr_model.to_str().unwrap())
+    let sv = SenseVoiceEngine::with_threads(asr_model.to_str().unwrap(), num_threads)
         .expect("Failed to load SenseVoice model");
 
     // --- Pipeline loop ---

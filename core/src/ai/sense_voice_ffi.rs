@@ -13,6 +13,7 @@ extern "C" {
         num_samples: c_int,
         out_text: *mut c_char,
         max_text_len: c_int,
+        n_threads: c_int,
     ) -> c_int;
 
     pub fn aura_sense_voice_free(ctx: *mut std::ffi::c_void);
