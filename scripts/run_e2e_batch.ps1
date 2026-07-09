@@ -35,6 +35,11 @@ $totalChunks = 0
 $totalFinal = 0
 $totalHardCut = 0
 $totalProvisional = 0
+$sumMinChunk = 0.0
+$sumAvgChunk = 0.0
+$sumMaxChunk = 0.0
+$globalMinChunk = [double]::MaxValue
+$globalMaxChunk = [double]::MinValue
 $multiChunkFiles = 0
 $tested = 0
 
@@ -102,6 +107,11 @@ foreach ($wav in $wavs) {
         $totalFinal += $final
         $totalHardCut += $hardCut
         $totalProvisional += $provisional
+        $sumMinChunk += $minChunk
+        $sumAvgChunk += $avgChunk
+        $sumMaxChunk += $maxChunk
+        if ($minChunk -gt 0 -and $minChunk -lt $globalMinChunk) { $globalMinChunk = $minChunk }
+        if ($maxChunk -gt $globalMaxChunk) { $globalMaxChunk = $maxChunk }
         if ($chunks -gt 1) { $multiChunkFiles++ }
         $tested++
     } else {
@@ -120,7 +130,13 @@ if ($tested -gt 0) {
     Write-Host "`n=== Segmentation Quality ($tested files) ==="
     Write-Host "Total chunks: $totalChunks  (Final: $totalFinal | HardCut: $totalHardCut | Provisional: $totalProvisional)"
     Write-Host "Files with >1 chunk: $multiChunkFiles ($([math]::Round($multiChunkFiles / $tested * 100, 0))%)"
-    Write-Host "Avg chunk duration: N/A  |  Min: N/A  |  Max: N/A"
+    $meanAvgChunk = [math]::Round($sumAvgChunk / $tested, 2)
+    $meanMinChunk = [math]::Round($sumMinChunk / $tested, 2)
+    $meanMaxChunk = [math]::Round($sumMaxChunk / $tested, 2)
+    $gMin = if ($globalMinChunk -lt [double]::MaxValue) { [math]::Round($globalMinChunk, 2) } else { 0 }
+    $gMax = if ($globalMaxChunk -gt [double]::MinValue) { [math]::Round($globalMaxChunk, 2) } else { 0 }
+    Write-Host "Mean of per-file avg/min/max chunk: ${meanAvgChunk}s / ${meanMinChunk}s / ${meanMaxChunk}s"
+    Write-Host "Global min/max chunk: ${gMin}s / ${gMax}s"
 }
 
 $results | Export-Csv "e2e_batch_results.csv" -NoTypeInformation
