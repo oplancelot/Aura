@@ -34,6 +34,11 @@ def main():
         print("cargo build failed:", result.stderr, file=sys.stderr)
         sys.exit(1)
 
+    # Remove debug aura_core.dll to avoid NETSDK1152 conflict with release build
+    debug_dll = core_release.parent / "debug" / "aura_core.dll"
+    if debug_dll.exists():
+        debug_dll.unlink()
+
     print("[2/3] Publishing Aura...")
     if publish_dir.exists():
         shutil.rmtree(publish_dir)
@@ -44,7 +49,9 @@ def main():
         capture_output=True, text=True
     )
     if result.returncode != 0:
-        print("dotnet publish failed:", result.stderr, file=sys.stderr)
+        print("dotnet publish failed:", file=sys.stderr)
+        print(result.stdout, file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
         sys.exit(1)
 
     print("[3/3] Copying runtime assets...")
