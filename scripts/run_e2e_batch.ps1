@@ -7,6 +7,23 @@ param(
     [int]$MaxFiles = 0
 )
 
+function Get-Percentile {
+    param(
+        [double[]]$Values,
+        [double]$Percentile
+    )
+    if ($null -eq $Values -or $Values.Count -eq 0) { return $null }
+    $sorted = $Values | Sort-Object
+    $n = $sorted.Count
+    if ($n -eq 1) { return [double]$sorted[0] }
+    $rank = ($Percentile / 100.0) * ($n - 1)
+    $lo = [int][math]::Floor($rank)
+    $hi = [int][math]::Ceiling($rank)
+    if ($lo -eq $hi) { return [double]$sorted[$lo] }
+    $w = $rank - $lo
+    return [double]($sorted[$lo] * (1.0 - $w) + $sorted[$hi] * $w)
+}
+
 $wavDir = "OpenSLR/LJSpeech/wavs"
 $example = "core\target\release\examples\e2e_transcribe_wav.exe"
 
@@ -28,6 +45,8 @@ if ($MaxFiles -gt 0) {
 $totalCount = $wavs.Count
 
 $results = @()
+$werList = [System.Collections.Generic.List[double]]::new()
+$asrList = [System.Collections.Generic.List[double]]::new()
 $totalWER = 0.0
 $totalAsrMs = 0.0
 $totalProcessTime = 0.0
@@ -41,6 +60,9 @@ $sumMaxChunk = 0.0
 $globalMinChunk = [double]::MaxValue
 $globalMaxChunk = [double]::MinValue
 $multiChunkFiles = 0
+$werZero = 0
+$werUnder5 = 0
+$werOver20 = 0
 $tested = 0
 
 Write-Host "Testing $totalCount files...`n"
@@ -103,6 +125,11 @@ foreach ($wav in $wavs) {
         $totalWER += $wer
         $totalAsrMs += $asrMs
         $totalProcessTime += $procTime
+        $werList.Add($wer)
+        $asrList.Add($asrMs)
+        if ($wer -eq 0) { $werZero++ }
+        if ($wer -lt 5) { $werUnder5++ }
+        if ($wer -ge 20) { $werOver20++ }
         $totalChunks += $chunks
         $totalFinal += $final
         $totalHardCut += $hardCut
@@ -122,10 +149,20 @@ foreach ($wav in $wavs) {
 Write-Host "`n=== E2E Batch Summary ==="
 Write-Host "Files tested: $tested / $totalCount"
 if ($tested -gt 0) {
-    Write-Host "Avg WER: $([math]::Round($totalWER / $tested, 1))%"
-    Write-Host "Avg ASR: $([math]::Round($totalAsrMs / $tested, 0))ms"
+    $werArr = $werList.ToArray()
+    $asrArr = $asrList.ToArray()
+    $werP50 = [math]::Round((Get-Percentile -Values $werArr -Percentile 50), 1)
+    $werP90 = [math]::Round((Get-Percentile -Values $werArr -Percentile 90), 1)
+    $werP95 = [math]::Round((Get-Percentile -Values $werArr -Percentile 95), 1)
+    $asrP50 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 50), 0)
+    $asrP90 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 90), 0)
+    $asrP95 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 95), 0)
+
+    Write-Host "Avg WER: $([math]::Round($totalWER / $tested, 1))%  |  p50/p90/p95: ${werP50}% / ${werP90}% / ${werP95}%"
+    Write-Host "Avg ASR: $([math]::Round($totalAsrMs / $tested, 0))ms  |  p50/p90/p95: ${asrP50}ms / ${asrP90}ms / ${asrP95}ms"
     Write-Host "Avg Processing: $([math]::Round($totalProcessTime / $tested, 2))s"
     Write-Host "Total ASR time: $([math]::Round($totalAsrMs / 1000, 1))s"
+    Write-Host "WER distribution: 0%=$werZero ($([math]::Round(100.0 * $werZero / $tested, 0))%)  |  <5%=$werUnder5 ($([math]::Round(100.0 * $werUnder5 / $tested, 0))%)  |  >=20%=$werOver20 ($([math]::Round(100.0 * $werOver20 / $tested, 0))%)"
 
     Write-Host "`n=== Segmentation Quality ($tested files) ==="
     Write-Host "Total chunks: $totalChunks  (Final: $totalFinal | HardCut: $totalHardCut | Provisional: $totalProvisional)"
