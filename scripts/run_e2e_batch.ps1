@@ -95,10 +95,12 @@ $multiChunkFiles = 0
 $flushFiles = 0
 $asrErrorFiles = 0
 $noRefCount = 0
-$werZero = 0
-$werUnder5 = 0
-$werOver20 = 0
-$tested = 0
+    $werZero = 0
+    $werUnder5 = 0
+    $werOver20 = 0
+    $endpointList = [System.Collections.Generic.List[double]]::new()
+    $ttfpList = [System.Collections.Generic.List[double]]::new()
+    $tested = 0
 
 Write-Host "Testing $totalCount files...`n"
 
@@ -122,6 +124,8 @@ foreach ($wav in $wavs) {
     $provisional = 0
     $minChunk = 0.0; $avgChunk = 0.0; $maxChunk = 0.0
     $flushThisFile = $false; $asrErrorsThisFile = 0
+    $epP50 = $null; $epP90 = $null; $epP95 = $null
+    $ttfp = $null
     $parsedMode = $null
 
     # Parse summary lines
@@ -149,6 +153,14 @@ foreach ($wav in $wavs) {
             $flushThisFile = ($Matches[1] -eq "yes")
             $asrErrorsThisFile = [int]$Matches[2]
         }
+        elseif ($line -match "^Endpoint latency \(Final\): p50=([\d.]+)ms.*p90=([\d.]+)ms.*p95=([\d.]+)ms") {
+            $epP50 = [double]$Matches[1]
+            $epP90 = [double]$Matches[2]
+            $epP95 = [double]$Matches[3]
+        }
+        elseif ($line -match "^TTFP: ([\d.]+)ms") {
+            $ttfp = [double]$Matches[1]
+        }
     }
     if ($parsedMode -and $parsedMode -ne $modeName) {
         Write-Host "  WARN: binary Mode=$parsedMode expected=$modeName" -ForegroundColor Yellow
@@ -172,6 +184,10 @@ foreach ($wav in $wavs) {
             Max_Chunk_s = $maxChunk
             Flush = $flushThisFile
             ASR_Errors = $asrErrorsThisFile
+            Endpoint_p50_ms = $epP50
+            Endpoint_p90_ms = $epP90
+            Endpoint_p95_ms = $epP95
+            TTFP_ms = $ttfp
         }
         $totalWER += $wer
         $totalAsrMs += $asrMs
@@ -193,6 +209,8 @@ foreach ($wav in $wavs) {
         if ($chunks -gt 1) { $multiChunkFiles++ }
         if ($flushThisFile) { $flushFiles++ }
         if ($asrErrorsThisFile -gt 0) { $asrErrorFiles++ }
+        if ($epP50 -ne $null) { $endpointList.Add($epP50) }
+        if ($ttfp -ne $null) { $ttfpList.Add($ttfp) }
         $tested++
     } else {
         Write-Host "  (no reference)"
@@ -241,6 +259,24 @@ if ($tested -gt 0) {
     Write-Host "Files with >1 chunk: $multiChunkFiles ($multiChunkPct%)"
     Write-Host "Flush used: $flushFiles ($([math]::Round(100.0 * $flushFiles / $tested, 0))%)  |  ASR errors: $asrErrorFiles files"
     Write-Host "No reference found: $noRefCount"
+
+    $epArr = $endpointList.ToArray()
+    if ($epArr.Count -gt 0) {
+        $epAvg = [math]::Round(($epArr | Measure-Object -Average).Average, 0)
+        $epP50 = [math]::Round((Get-Percentile -Values $epArr -Percentile 50), 0)
+        $epP90 = [math]::Round((Get-Percentile -Values $epArr -Percentile 90), 0)
+        $epP95 = [math]::Round((Get-Percentile -Values $epArr -Percentile 95), 0)
+        Write-Host "Endpoint latency (Final p50, per-file): avg=${epAvg}ms  p50/p90/p95: ${epP50}ms / ${epP90}ms / ${epP95}ms"
+    }
+    $ttfpArr = $ttfpList.ToArray()
+    if ($ttfpArr.Count -gt 0) {
+        $ttfpAvg = [math]::Round(($ttfpArr | Measure-Object -Average).Average, 0)
+        $ttfpP50 = [math]::Round((Get-Percentile -Values $ttfpArr -Percentile 50), 0)
+        $ttfpP90 = [math]::Round((Get-Percentile -Values $ttfpArr -Percentile 90), 0)
+        $ttfpP95 = [math]::Round((Get-Percentile -Values $ttfpArr -Percentile 95), 0)
+        Write-Host "TTFP: avg=${ttfpAvg}ms  p50/p90/p95: ${ttfpP50}ms / ${ttfpP90}ms / ${ttfpP95}ms"
+    }
+
     Write-Host "Mean of per-file avg/min/max chunk: ${meanAvgChunk}s / ${meanMinChunk}s / ${meanMaxChunk}s"
     Write-Host "Global min/max chunk: ${gMin}s / ${gMax}s"
 }
@@ -293,6 +329,14 @@ $summary = [ordered]@{
         mean_avg_chunk_s         = $meanAvgChunk
         mean_min_chunk_s         = $meanMinChunk
         mean_max_chunk_s         = $meanMaxChunk
+        endpoint_avg_ms          = if ($epArr.Count -gt 0) { [math]::Round(($epArr | Measure-Object -Average).Average, 0) } else { $null }
+        endpoint_p50_ms          = if ($epArr.Count -gt 0) { $epP50 } else { $null }
+        endpoint_p90_ms          = if ($epArr.Count -gt 0) { $epP90 } else { $null }
+        endpoint_p95_ms          = if ($epArr.Count -gt 0) { $epP95 } else { $null }
+        ttfp_avg_ms              = if ($ttfpArr.Count -gt 0) { $ttfpAvg } else { $null }
+        ttfp_p50_ms              = if ($ttfpArr.Count -gt 0) { $ttfpP50 } else { $null }
+        ttfp_p90_ms              = if ($ttfpArr.Count -gt 0) { $ttfpP90 } else { $null }
+        ttfp_p95_ms              = if ($ttfpArr.Count -gt 0) { $ttfpP95 } else { $null }
         global_min_chunk_s       = $gMin
         global_max_chunk_s       = $gMax
     }

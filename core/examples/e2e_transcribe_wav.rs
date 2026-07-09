@@ -119,6 +119,8 @@ fn main() {
     let mut provisional_count = 0u32;
     let mut flush_used = false;
     let mut asr_error_count = 0u32;
+    let mut first_provisional_offset_ms: Option<f64> = None;
+    let mut endpoint_latencies: Vec<f64> = Vec::new(); // ms per Final/HardCut chunk
     let start = Instant::now();
 
     println!("\n--- Utterance breakdown ---");
@@ -140,17 +142,26 @@ fn main() {
             match chunk.chunk_type {
                 ChunkType::Provisional => {
                     provisional_count += 1;
+                    if first_provisional_offset_ms.is_none() {
+                        first_provisional_offset_ms = Some(chunk.speech_start_offset.as_secs_f64() * 1000.0);
+                    }
                     println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk  {asr:>6}  [preview] \"{snippet}...\"",
                         asr = "0ms ASR".to_string(),
                         snippet = &preview_text(&chunk.samples, 40));
                 }
                 ChunkType::Final => {
                     final_count += 1;
-                    asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    // Endpoint = silence at end + ASR time
+                    let frame_ms = SileroVad::AUDIO_SAMPLES as f64 * 1000.0 / SileroVad::SAMPLE_RATE as f64;
+                    let ep = chunk.end_silence_frames as f64 * frame_ms + asr_elapsed;
+                    endpoint_latencies.push(ep);
                 }
                 ChunkType::HardCut => {
                     hardcut_count += 1;
-                    asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    // HardCut endpoint = ASR time only (no trailing silence, speech still ongoing)
+                    endpoint_latencies.push(asr_elapsed);
                 }
             }
         }
@@ -173,7 +184,10 @@ fn main() {
                     chunk_index += 1;
                     final_count += 1;
                     flush_used = true;
-                    asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    let frame_ms = SileroVad::AUDIO_SAMPLES as f64 * 1000.0 / SileroVad::SAMPLE_RATE as f64;
+                    let ep = chunk.end_silence_frames as f64 * frame_ms + asr_elapsed;
+                    endpoint_latencies.push(ep);
                     break;
                 }
                 ChunkType::Provisional => {
@@ -218,6 +232,39 @@ fn main() {
         println!("Avg chunk: {:.1}s  |  Min: {:.1}s  |  Max: {:.1}s",
             avg_chunk, min_chunk, max_chunk);
     }
+
+    // Compute endpoint latency percentiles for Final chunks only
+    let final_eps: Vec<f64> = endpoint_latencies.iter().copied().filter(|&v| v > 0.0).collect();
+    if !final_eps.is_empty() {
+        let mut sorted = final_eps.clone();
+        sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        let p50 = percentile(&sorted, 50.0);
+        let p90 = percentile(&sorted, 90.0);
+        let p95 = percentile(&sorted, 95.0);
+        println!("Endpoint latency (Final): p50={p50:.0}ms  p90={p90:.0}ms  p95={p95:.0}ms");
+    }
+
+    if let Some(ttfp) = first_provisional_offset_ms {
+        println!("TTFP: {ttfp:.0}ms  (first Provisional after speech onset)");
+    }
+}
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let n = sorted.len() as f64;
+    let rank = p / 100.0 * (n - 1.0);
+    let lo = rank.floor() as usize;
+    let hi = rank.ceil() as usize;
+    if lo >= sorted.len() {
+        return *sorted.last().unwrap();
+    }
+    if hi >= sorted.len() || lo == hi {
+        return sorted[lo];
+    }
+    let w = rank - lo as f64;
+    sorted[lo] * (1.0 - w) + sorted[hi] * w
 }
 
 fn asr_and_log(
@@ -230,25 +277,29 @@ fn asr_and_log(
     e2e_text: &mut String,
     total_asr_ms: &mut u64,
     asr_error_count: &mut u32,
-) {
+) -> f64 {
     let t0 = Instant::now();
-    match sv.transcribe(samples) {
+    let result = match sv.transcribe(samples) {
         Ok(text) if !text.is_empty() => {
             let elapsed = t0.elapsed();
             *total_asr_ms += elapsed.as_millis() as u64;
             if !e2e_text.is_empty() { e2e_text.push(' '); }
             e2e_text.push_str(&text);
             println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk  {:>3}ms ASR  \"{}\"", elapsed.as_millis(), text);
+            elapsed.as_secs_f64() * 1000.0
         }
         Ok(_) => {
             println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
+            0.0
         }
         Err(e) => {
             *asr_error_count += 1;
             println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
+            0.0
         }
-    }
+    };
     vad.reset_state();
+    result
 }
 
 fn preview_text(samples: &[f32], _max_chars: usize) -> String {

@@ -65,6 +65,11 @@ pub struct AudioChunk {
     pub chunk_type: ChunkType,
     /// PCM samples (f32, 16 kHz, mono).
     pub samples: Vec<f32>,
+    /// Duration from speech onset (or last HardCut reset) to chunk emission.
+    pub speech_start_offset: Duration,
+    /// Number of consecutive silence frames at end of chunk before emission.
+    /// Zero for Provisional / HardCut; non-zero for Final.
+    pub end_silence_frames: u32,
 }
 
 // ── State machine ──────────────────────────────────────────────────────
@@ -196,17 +201,24 @@ impl ChunkingStateMachine {
 
     fn emit_provisional(&self) -> AudioChunk {
         log::debug!("Emitting Provisional chunk ({} samples)", self.buffer.len());
+        let offset = self.speech_start.map(|t| t.elapsed()).unwrap_or_default();
         AudioChunk {
             chunk_type: ChunkType::Provisional,
             samples: self.buffer.clone(),
+            speech_start_offset: offset,
+            end_silence_frames: 0,
         }
     }
 
     fn emit_final(&mut self) -> AudioChunk {
         log::debug!("Emitting Final chunk ({} samples)", self.buffer.len());
+        let offset = self.speech_start.map(|t| t.elapsed()).unwrap_or_default();
+        let sil_frames = self.silence_frame_count;
         let chunk = AudioChunk {
             chunk_type: ChunkType::Final,
             samples: std::mem::take(&mut self.buffer),
+            speech_start_offset: offset,
+            end_silence_frames: sil_frames,
         };
         self.reset();
         chunk
@@ -225,9 +237,12 @@ impl ChunkingStateMachine {
                     vec![]
                 };
 
+                let offset = self.speech_start.map(|t| t.elapsed()).unwrap_or_default();
                 let chunk = AudioChunk {
                     chunk_type: ChunkType::HardCut,
                     samples: std::mem::take(&mut self.buffer),
+                    speech_start_offset: offset,
+                    end_silence_frames: 0,
                 };
 
                 // Seed the next buffer with overlap for context continuity
