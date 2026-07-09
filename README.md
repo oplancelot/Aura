@@ -1,8 +1,8 @@
 # Aura ✨
 
-**Real-time AI voice translation overlay for gamers.**
+**Real-time AI translation subtitles overlay for any application.**
 
-Captures audio from Discord / Teams, translates it via AI, and displays transparent subtitles on top of your game — with zero mouse interference.
+Captures audio from any app (browser, game, chat, media player), transcribes and translates it via AI, and displays transparent subtitles on top of your screen — with zero mouse interference.
 
 ## Architecture
 

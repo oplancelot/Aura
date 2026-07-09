@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using Aura.Localization;
 
 namespace Aura.Views;
 
@@ -12,6 +13,7 @@ public partial class SettingsWindow : Window
 {
     private readonly DispatcherTimer _refreshTimer;
     private bool _updateCheckDone;
+    private UpdateCheckResult? _lastCheckResult;
 
     public SettingsWindow()
     {
@@ -33,19 +35,22 @@ public partial class SettingsWindow : Window
         if (_updateCheckDone) return;
         _updateCheckDone = true;
 
+        var lm = LanguageManager.Instance;
         var result = await UpdateChecker.CheckAsync();
+        _lastCheckResult = result;
         Dispatcher.Invoke(() =>
         {
             if (result.HasUpdate && result.Info != null)
             {
-                var tag = result.Info.TargetFullRelease.Version;
-                UpdateStatusText.Text = $"v{tag} available!";
-                CheckUpdateButton.Content = "Download & Restart";
+                var tag = result.Info.TargetFullRelease.Version.ToString();
+                UpdateStatusText.Text = lm.UpdateAvailable(tag);
+                CheckUpdateButton.Content = lm.DownloadAndRestart;
+                ResetCheckButtonStyle();
                 CheckUpdateButton.Click -= OnCheckUpdateClick;
                 CheckUpdateButton.Click += async (_, _) =>
                 {
                     CheckUpdateButton.IsEnabled = false;
-                    UpdateStatusText.Text = "Downloading...";
+                    UpdateStatusText.Text = lm.Downloading;
                     try
                     {
                         await UpdateChecker.DownloadUpdateAsync(result.Info);
@@ -53,27 +58,45 @@ public partial class SettingsWindow : Window
                     }
                     catch (Exception ex)
                     {
-                        UpdateStatusText.Text = $"Update failed: {ex.Message}";
+                        UpdateStatusText.Text = lm.UpdateFailed(ex.Message);
                         CheckUpdateButton.IsEnabled = true;
                     }
                 };
+                CheckUpdateButton.IsEnabled = true;
+                CheckUpdateButton.Visibility = Visibility.Visible;
+                UpdateStatusText.Visibility = Visibility.Visible;
             }
             else if (result.ErrorMessage != null)
             {
-                UpdateStatusText.Text = $"Check failed: {result.ErrorMessage}";
+                UpdateStatusText.Text = lm.CheckFailedGithub;
+                CheckUpdateButton.Content = lm.OpenGithub;
+                SetGitHubButtonStyle();
+                CheckUpdateButton.Click -= OnCheckUpdateClick;
+                CheckUpdateButton.Click += (_, _) =>
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "https://github.com/oplancelot/Aura/releases",
+                        UseShellExecute = true
+                    });
+                CheckUpdateButton.IsEnabled = true;
+                CheckUpdateButton.Visibility = Visibility.Visible;
+                UpdateStatusText.Visibility = Visibility.Visible;
             }
             else
             {
-                UpdateStatusText.Text = $"v{result.CurrentVersion} — up to date";
-                CheckUpdateButton.IsEnabled = false;
+                UpdateStatusText.Visibility = Visibility.Collapsed;
+                CheckUpdateButton.Visibility = Visibility.Collapsed;
             }
         });
     }
 
     private async void OnCheckUpdateClick(object sender, RoutedEventArgs e)
     {
+        ResetCheckButtonStyle();
         CheckUpdateButton.IsEnabled = false;
-        UpdateStatusText.Text = "Checking...";
+        UpdateStatusText.Text = LanguageManager.Instance.CheckInProgress;
+        UpdateStatusText.Visibility = Visibility.Visible;
+        CheckUpdateButton.Visibility = Visibility.Visible;
         _updateCheckDone = false;
         await CheckForUpdatesAsync();
     }
@@ -84,11 +107,6 @@ public partial class SettingsWindow : Window
             ? (int)prev.Tag : -1;
 
         ProcessComboBox.Items.Clear();
-        ProcessComboBox.Items.Add(new ComboBoxItem
-        {
-            Content = "Self test (simulated subtitles)",
-            Tag = 0
-        });
 
         var appPids = Interop.NativeMethods.GetVisibleAppPids();
         appPids.Remove((uint)Environment.ProcessId);
@@ -120,10 +138,58 @@ public partial class SettingsWindow : Window
                 Content = $"{proc.ProcessName} (PID: {proc.Id})",
                 Tag = proc.Id
             });
-            if (proc.Id == prevPid) selectedIdx = i + 1;
+            if (proc.Id == prevPid) selectedIdx = i;
         }
 
-        ProcessComboBox.SelectedIndex = selectedIdx;
+        var selfTestIdx = processes.Count;
+        ProcessComboBox.Items.Add(new ComboBoxItem
+        {
+            Content = LanguageManager.Instance.SelfTestItem,
+            Tag = 0
+        });
+
+        ProcessComboBox.SelectedIndex = prevPid == 0 ? selfTestIdx : selectedIdx;
+    }
+
+    private void OnToggleLanguage(object sender, RoutedEventArgs e)
+    {
+        LanguageManager.Instance.ToggleLanguage();
+        RefreshUpdateText();
+    }
+
+    private void RefreshUpdateText()
+    {
+        if (_lastCheckResult == null) return;
+        var lm = LanguageManager.Instance;
+
+        if (_lastCheckResult.HasUpdate && _lastCheckResult.Info != null)
+        {
+            ResetCheckButtonStyle();
+            UpdateStatusText.Text = lm.UpdateAvailable(_lastCheckResult.Info.TargetFullRelease.Version.ToString());
+            CheckUpdateButton.Content = lm.DownloadAndRestart;
+        }
+        else if (_lastCheckResult.ErrorMessage != null)
+        {
+            UpdateStatusText.Text = lm.CheckFailedGithub;
+            CheckUpdateButton.Content = lm.OpenGithub;
+            SetGitHubButtonStyle();
+        }
+    }
+
+    private void ResetCheckButtonStyle()
+    {
+        CheckUpdateButton.ClearValue(Button.PaddingProperty);
+        CheckUpdateButton.ClearValue(Button.FontSizeProperty);
+        CheckUpdateButton.ClearValue(Button.BackgroundProperty);
+        CheckUpdateButton.ClearValue(Button.BorderBrushProperty);
+    }
+
+    private void SetGitHubButtonStyle()
+    {
+        CheckUpdateButton.Padding = new Thickness(10, 2, 10, 2);
+        CheckUpdateButton.FontSize = 11;
+        CheckUpdateButton.Background = System.Windows.Media.Brushes.Transparent;
+        CheckUpdateButton.BorderBrush = System.Windows.Media.Brushes.Gray;
     }
 
     private void OnEngineChanged(object sender, SelectionChangedEventArgs e)
@@ -134,8 +200,8 @@ public partial class SettingsWindow : Window
     {
         if (ProcessComboBox.SelectedItem is not ComboBoxItem selectedProcess)
         {
-            MessageBox.Show("Please select a target voice application.",
-                "Aura", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(LanguageManager.Instance.SelectTargetApp,
+                LanguageManager.Instance.DialogTitleAura, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -153,8 +219,8 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            MessageBox.Show("Failed to start translation pipeline.",
-                "Aura Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(LanguageManager.Instance.StartPipelineFailed,
+                LanguageManager.Instance.DialogTitleError, MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -163,5 +229,10 @@ public partial class SettingsWindow : Window
         Interop.AuraCoreBinding.Stop();
         StartButton.IsEnabled = true;
         StopButton.IsEnabled = false;
+    }
+
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        Application.Current.Shutdown();
     }
 }
