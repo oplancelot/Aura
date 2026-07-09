@@ -38,7 +38,7 @@ fn main() {
 
     // Resolve model paths
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let asr_model = manifest_dir.join("..").join("models").join("sense-voice-small-q4_k.gguf");
+    let asr_model = manifest_dir.join("..").join("assets").join("sense-voice-small-q4_k.gguf");
     if !asr_model.exists() {
         eprintln!("ASR model not found at: {}", asr_model.display());
         std::process::exit(1);
