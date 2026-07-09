@@ -45,6 +45,7 @@ core/LibriSpeech ASR corpus/
 # ── Test outputs ──
 asr_batch_results*.csv
 scripts/logs/
+scripts/__pycache__/
 
 # ── Generated feature files ──
 fbank_lfr_cmvn_feature.json
