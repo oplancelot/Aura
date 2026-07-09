@@ -14,16 +14,19 @@ fn main() {
     // Default is Accuracy mode (no per-frame sleep). Pass --realtime to
     // simulate ~16ms frame pacing for latency-oriented runs.
     let realtime = args.iter().any(|a| a == "--realtime");
+    let display_eval = args.iter().any(|a| a == "--display-eval");
     let wav_path = args.iter()
         .skip(1)
         .find(|a| !a.starts_with('-'))
         .map(|s| s.as_str());
     let Some(wav_path) = wav_path else {
-        eprintln!("Usage: {} <wav_path> [--realtime] [--silence-close N] [--hard-cut N]", args[0]);
+        eprintln!("Usage: {} <wav_path> [--realtime] [--display-eval] [--silence-close N] [--hard-cut N] [--threads N]", args[0]);
         eprintln!("  default: Accuracy mode (fast, no frame sleep)");
         eprintln!("  --realtime: sleep ~16ms per VAD frame (simulates live capture)");
+        eprintln!("  --display-eval: run ASR on Provisional chunks for preview quality metrics");
         eprintln!("  --silence-close N: silence_close_ms (default 200)");
         eprintln!("  --hard-cut N: hard_cut_ms (default 5000)");
+        eprintln!("  --threads N: ASR thread count (default 4)");
         std::process::exit(1);
     };
     let wav_file = Path::new(wav_path);
@@ -142,6 +145,11 @@ fn main() {
     let mut asr_error_count = 0u32;
     let mut first_provisional_offset_ms: Option<f64> = None;
     let mut endpoint_latencies: Vec<f64> = Vec::new(); // ms per Final/HardCut chunk
+    // Display-eval tracking
+    let mut pending_prov_texts: Vec<String> = Vec::new();
+    let mut all_prefix_match_rates: Vec<f64> = Vec::new();
+    let mut stable_pairs: u32 = 0;
+    let mut total_pairs: u32 = 0;
     let start = Instant::now();
 
     println!("\n--- Utterance breakdown ---");
@@ -166,22 +174,46 @@ fn main() {
                     if first_provisional_offset_ms.is_none() {
                         first_provisional_offset_ms = Some(chunk.speech_start_offset.as_secs_f64() * 1000.0);
                     }
-                    println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk  {asr:>6}  [preview] \"{snippet}...\"",
-                        asr = "0ms ASR".to_string(),
-                        snippet = &preview_text(&chunk.samples, 40));
+                    if display_eval {
+                        let t0 = Instant::now();
+                        match sv.transcribe(&chunk.samples) {
+                            Ok(text) if !text.is_empty() => {
+                                let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                                total_asr_ms += ms as u64;
+                                println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk  {:>3}ms ASR  [eval] \"{text}\"", ms as u64);
+                                pending_prov_texts.push(text);
+                            }
+                            Ok(_) => {
+                                println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk     0ms ASR  [eval] (no speech)");
+                            }
+                            Err(e) => {
+                                asr_error_count += 1;
+                                println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk     0ms ASR  [eval] [!] ASR error: {e}");
+                            }
+                        }
+                        // Do NOT reset VAD state for Provisional — utterance still active
+                    } else {
+                        println!("#{chunk_index:4}  Provisional  {chunk_sec:6.1}s chunk  {asr:>6}  [preview] \"{snippet}...\"",
+                            asr = "0ms ASR".to_string(),
+                            snippet = &preview_text(&chunk.samples, 40));
+                    }
                 }
                 ChunkType::Final => {
                     final_count += 1;
+                    let prev_len = e2e_text.len();
                     let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
-                    // Endpoint = silence at end + ASR time
+                    let new_text = e2e_text[prev_len..].trim_start().to_string();
+                    flush_display_group(&mut pending_prov_texts, &new_text, &mut all_prefix_match_rates, &mut stable_pairs, &mut total_pairs);
                     let frame_ms = SileroVad::AUDIO_SAMPLES as f64 * 1000.0 / SileroVad::SAMPLE_RATE as f64;
                     let ep = chunk.end_silence_frames as f64 * frame_ms + asr_elapsed;
                     endpoint_latencies.push(ep);
                 }
                 ChunkType::HardCut => {
                     hardcut_count += 1;
+                    let prev_len = e2e_text.len();
                     let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
-                    // HardCut endpoint = ASR time only (no trailing silence, speech still ongoing)
+                    let new_text = e2e_text[prev_len..].trim_start().to_string();
+                    flush_display_group(&mut pending_prov_texts, &new_text, &mut all_prefix_match_rates, &mut stable_pairs, &mut total_pairs);
                     endpoint_latencies.push(asr_elapsed);
                 }
             }
@@ -205,7 +237,10 @@ fn main() {
                     chunk_index += 1;
                     final_count += 1;
                     flush_used = true;
+                    let prev_len = e2e_text.len();
                     let asr_elapsed = asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
+                    let new_text = e2e_text[prev_len..].trim_start().to_string();
+                    flush_display_group(&mut pending_prov_texts, &new_text, &mut all_prefix_match_rates, &mut stable_pairs, &mut total_pairs);
                     let frame_ms = SileroVad::AUDIO_SAMPLES as f64 * 1000.0 / SileroVad::SAMPLE_RATE as f64;
                     let ep = chunk.end_silence_frames as f64 * frame_ms + asr_elapsed;
                     endpoint_latencies.push(ep);
@@ -268,6 +303,81 @@ fn main() {
     if let Some(ttfp) = first_provisional_offset_ms {
         println!("TTFP: {ttfp:.0}ms  (first Provisional after speech onset)");
     }
+
+    if display_eval && !all_prefix_match_rates.is_empty() {
+        let avg_pm = all_prefix_match_rates.iter().sum::<f64>() / all_prefix_match_rates.len() as f64;
+        let mut sorted_pm = all_prefix_match_rates.clone();
+        sorted_pm.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        let pm_p50 = percentile(&sorted_pm, 50.0);
+        let pm_p90 = percentile(&sorted_pm, 90.0);
+        let stability_pct = if total_pairs > 0 {
+            100.0 * stable_pairs as f64 / total_pairs as f64
+        } else {
+            100.0
+        };
+        println!("\n=== Display Quality ===");
+        println!("Provisional ASR chunks: {}  |  Prefix match: p50={pm_p50:.0}%  p90={pm_p90:.0}%  avg={avg_pm:.0}%",
+            all_prefix_match_rates.len());
+        println!("Text stability: {stability_pct:.0}%  (monotonic: {stable_pairs}/{total_pairs} pairs)");
+    }
+}
+
+fn flush_display_group(
+    pending: &mut Vec<String>,
+    segment: &str,
+    prefix_rates: &mut Vec<f64>,
+    stable: &mut u32,
+    total: &mut u32,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let seg_lower = segment.to_lowercase();
+    let seg_words: Vec<&str> = seg_lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if seg_words.is_empty() {
+        pending.clear();
+        return;
+    }
+    for prov_text in pending.iter() {
+        let prov_lower = prov_text.to_lowercase();
+        let prov_words: Vec<&str> = prov_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        if prov_words.is_empty() {
+            continue;
+        }
+        let lcp = prov_words.iter()
+            .zip(seg_words.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let pm = lcp as f64 / prov_words.len() as f64 * 100.0;
+        prefix_rates.push(pm);
+    }
+    // Stability: consecutive prov texts should be monotonic (earlier is prefix of later)
+    for i in 1..pending.len() {
+        let prev_lower = pending[i - 1].to_lowercase();
+        let prev_words: Vec<&str> = prev_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        let curr_lower = pending[i].to_lowercase();
+        let curr_words: Vec<&str> = curr_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        let is_stable = prev_words.iter()
+            .zip(curr_words.iter())
+            .all(|(a, b)| a == b);
+        if is_stable {
+            *stable += 1;
+        }
+        *total += 1;
+    }
+    pending.clear();
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {

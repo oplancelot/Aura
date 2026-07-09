@@ -7,6 +7,7 @@
 param(
     [int]$MaxFiles = 0,
     [switch]$Realtime,
+    [switch]$DisplayEval,
     [ValidateSet("Accuracy", "Latency")]
     [string]$Suite = "Accuracy",
     [int]$SilenceClose = 0,  # override silence_close_ms (0 = leave default)
@@ -103,6 +104,8 @@ $noRefCount = 0
     $werOver20 = 0
     $endpointList = [System.Collections.Generic.List[double]]::new()
     $ttfpList = [System.Collections.Generic.List[double]]::new()
+    $prefixMatchList = [System.Collections.Generic.List[double]]::new()
+    $stabilityList = [System.Collections.Generic.List[double]]::new()
     $tested = 0
 
 Write-Host "Testing $totalCount files...`n"
@@ -113,6 +116,7 @@ foreach ($wav in $wavs) {
 
     $cmdline = @($wav.FullName)
     if ($Realtime) { $cmdline += "--realtime" }
+    if ($DisplayEval) { $cmdline += "--display-eval" }
     if ($SilenceClose -gt 0) { $cmdline += "--silence-close"; $cmdline += "$SilenceClose" }
     if ($HardCut -gt 0) { $cmdline += "--hard-cut"; $cmdline += "$HardCut" }
     if ($Threads -gt 0) { $cmdline += "--threads"; $cmdline += "$Threads" }
@@ -130,6 +134,8 @@ foreach ($wav in $wavs) {
     $flushThisFile = $false; $asrErrorsThisFile = 0
     $epP50 = $null; $epP90 = $null; $epP95 = $null
     $ttfp = $null
+    $pmAvg = $null; $pmP50 = $null; $pmP90 = $null
+    $stability = $null
     $parsedMode = $null
 
     # Parse summary lines
@@ -165,6 +171,14 @@ foreach ($wav in $wavs) {
         elseif ($line -match "^TTFP: ([\d.]+)ms") {
             $ttfp = [double]$Matches[1]
         }
+        elseif ($line -match "^Provisional ASR chunks: \d+  \|  Prefix match: p50=([\d.]+)%  p90=([\d.]+)%  avg=([\d.]+)%") {
+            $pmP50 = [double]$Matches[1]
+            $pmP90 = [double]$Matches[2]
+            $pmAvg = [double]$Matches[3]
+        }
+        elseif ($line -match "^Text stability: ([\d.]+)%") {
+            $stability = [double]$Matches[1]
+        }
     }
     if ($parsedMode -and $parsedMode -ne $modeName) {
         Write-Host "  WARN: binary Mode=$parsedMode expected=$modeName" -ForegroundColor Yellow
@@ -192,6 +206,10 @@ foreach ($wav in $wavs) {
             Endpoint_p90_ms = $epP90
             Endpoint_p95_ms = $epP95
             TTFP_ms = $ttfp
+            PrefixMatch_avg = $pmAvg
+            PrefixMatch_p50 = $pmP50
+            PrefixMatch_p90 = $pmP90
+            Stability_pct = $stability
         }
         $totalWER += $wer
         $totalAsrMs += $asrMs
@@ -215,6 +233,8 @@ foreach ($wav in $wavs) {
         if ($asrErrorsThisFile -gt 0) { $asrErrorFiles++ }
         if ($epP50 -ne $null) { $endpointList.Add($epP50) }
         if ($ttfp -ne $null) { $ttfpList.Add($ttfp) }
+        if ($pmAvg -ne $null) { $prefixMatchList.Add($pmAvg) }
+        if ($stability -ne $null) { $stabilityList.Add($stability) }
         $tested++
     } else {
         Write-Host "  (no reference)"
@@ -263,6 +283,19 @@ if ($tested -gt 0) {
     Write-Host "Files with >1 chunk: $multiChunkFiles ($multiChunkPct%)"
     Write-Host "Flush used: $flushFiles ($([math]::Round(100.0 * $flushFiles / $tested, 0))%)  |  ASR errors: $asrErrorFiles files"
     Write-Host "No reference found: $noRefCount"
+
+    $pmArr = $prefixMatchList.ToArray()
+    if ($pmArr.Count -gt 0) {
+        $pmAvg = [math]::Round(($pmArr | Measure-Object -Average).Average, 0)
+        $pmP50 = [math]::Round((Get-Percentile -Values $pmArr -Percentile 50), 0)
+        $pmP90 = [math]::Round((Get-Percentile -Values $pmArr -Percentile 90), 0)
+        Write-Host "Prefix match: avg=${pmAvg}%  p50/p90: ${pmP50}% / ${pmP90}%"
+    }
+    $stArr = $stabilityList.ToArray()
+    if ($stArr.Count -gt 0) {
+        $stAvg = [math]::Round(($stArr | Measure-Object -Average).Average, 0)
+        Write-Host "Text stability: avg=${stAvg}%"
+    }
 
     $epArr = $endpointList.ToArray()
     if ($epArr.Count -gt 0) {
@@ -330,6 +363,10 @@ $summary = [ordered]@{
         flush_pct                = if ($tested -gt 0) { [math]::Round(100.0 * $flushFiles / $tested, 0) } else { $null }
         asr_error_files          = $asrErrorFiles
         no_ref_count             = $noRefCount
+        prefix_match_avg_pct     = if ($pmArr.Count -gt 0) { $pmAvg } else { $null }
+        prefix_match_p50_pct     = if ($pmArr.Count -gt 0) { $pmP50 } else { $null }
+        prefix_match_p90_pct     = if ($pmArr.Count -gt 0) { $pmP90 } else { $null }
+        text_stability_avg_pct   = if ($stArr.Count -gt 0) { $stAvg } else { $null }
         mean_avg_chunk_s         = $meanAvgChunk
         mean_min_chunk_s         = $meanMinChunk
         mean_max_chunk_s         = $meanMaxChunk
