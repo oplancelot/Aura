@@ -57,13 +57,14 @@ foreach ($wav in $wavs) {
     $minChunk = 0.0; $avgChunk = 0.0; $maxChunk = 0.0
 
     # Parse summary lines
+    # Example summary: "Audio: 6.0s | Processing: 0.9s | ASR: 720ms total | RTF: 0.15x"
     foreach ($line in $output) {
         if ($line -match "^WER: ([\d.]+)%") { $wer = [double]$Matches[1] }
-        elseif ($line -match "^Audio: ([\d.]+)s .* ASR: (\d+)ms") {
+        elseif ($line -match "^Audio: ([\d.]+)s\s*\|\s*Processing: ([\d.]+)s\s*\|\s*ASR: (\d+)ms") {
             $audioTime = [double]$Matches[1]
-            $asrMs = [double]$Matches[2]
+            $procTime = [double]$Matches[2]
+            $asrMs = [double]$Matches[3]
         }
-        elseif ($line -match "Processing: ([\d.]+)s") { $procTime = [double]$Matches[1] }
         elseif ($line -match "^Total chunks: (\d+).*Final: (\d+), HardCut: (\d+), Provisional: (\d+)") {
             $chunks = [int]$Matches[1]
             $final = [int]$Matches[2]
