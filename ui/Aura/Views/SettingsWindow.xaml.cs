@@ -90,12 +90,10 @@ public partial class SettingsWindow : Window
             Tag = 0
         });
 
-        var targetApps = new[] { "msedge", "edge", "chrome", "vlc", "discord",
-                                 "ms-teams", "MSTeams", "Teams" };
+        var appPids = Interop.NativeMethods.GetVisibleAppPids();
 
         var processes = Process.GetProcesses()
-            .Where(p => p.Id > 0 && targetApps.Any(app =>
-                p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase)))
+            .Where(p => p.Id > 0 && appPids.Contains((uint)p.Id))
             .OrderBy(p => p.ProcessName)
             .ToList();
 
