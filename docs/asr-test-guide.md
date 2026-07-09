@@ -67,15 +67,10 @@ WER: 0.0%
 
 ### 2.2 批量测试（评估 ASR 整体质量）
 
-```powershell
-# 先编译
-cd core
-cargo build --release --example transcribe_wav
-
-# 用批量脚本
-cd ..
-.\scripts\run_asr_batch.ps1 -MaxFiles 10   # 测前 10 个
-.\scripts\run_asr_batch.ps1                  # 测全部 13,100 个
+```bash
+# 用批量脚本（自动编译）
+python scripts/run_asr_batch.py --max-files 10   # 测前 10 个
+python scripts/run_asr_batch.py                    # 测全部 13,100 个
 ```
 
 输出 CSV：`asr_batch_results.csv`

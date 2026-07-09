@@ -41,29 +41,38 @@
 
 | 脚本 | 功能 |
 |------|------|
-| `scripts/run_e2e_batch.ps1` | 主批量测试：编译→遍历 WAV→解析输出→CSV+JSON |
-| `scripts/run_asr_batch.ps1` | Offline ASR 基线（30s 定长切句，无 VAD） |
-| `scripts/compare_e2e_baseline.ps1` | ASR vs E2E 对比，计算 ΔWER 门禁 |
-| `scripts/run_e2e_sweep.ps1` | ChunkingConfig 参数扫描 |
-| `scripts/run_thread_sweep.ps1` | ASR 线程数扫描 |
+| `scripts/run_e2e_batch.py` | 主批量测试：编译→遍历 WAV→解析输出→CSV+JSON |
+| `scripts/run_asr_batch.py` | Offline ASR 基线（30s 定长切句，无 VAD） |
+| `scripts/compare_e2e_baseline.py` | ASR vs E2E 对比，计算 ΔWER 门禁 |
+| `scripts/run_e2e_sweep.py` | ChunkingConfig 参数扫描 |
+| `scripts/run_thread_sweep.py` | ASR 线程数扫描 |
 
 ### 3.1 参数说明
 
-```powershell
-.\scripts\run_e2e_batch.ps1 `
-  -MaxFiles 100 `          # 测试文件数 (0=全部)
-  -Suite Accuracy|Latency ` # 测试模式
-  -DisplayEval `            # 预览质量评测
-  -SilenceClose 200 `       # 覆盖 silence_close_ms
-  -HardCut 5000 `           # 覆盖 hard_cut_ms
-  -Threads 4                # 覆盖 ASR 线程数
+```bash
+python scripts/run_e2e_batch.py \
+  --max-files 100 \         # 测试文件数 (0=全部)
+  --suite Accuracy|Latency \# 测试模式
+  --display-eval \           # 预览质量评测
+  --silence-close 200 \      # 覆盖 silence_close_ms
+  --hard-cut 5000 \          # 覆盖 hard_cut_ms
+  --threads 4                # 覆盖 ASR 线程数
 ```
 
 ### 3.2 输出文件
 
+所有输出统一写入 `scripts/logs/`，不入 Git：
+
 ```
-e2e_batch_results_{mode}_{timestamp}.csv   # 逐文件明细
-e2e_batch_summary_{mode}_{timestamp}.json  # 汇总+元信息
+scripts/logs/
+  e2e_batch_results_{mode}_{timestamp}.csv   # 逐文件明细
+  e2e_batch_summary_{mode}_{timestamp}.json  # 汇总+元信息
+  asr_batch_results_{timestamp}.csv           # 离线 ASR 明细
+  asr_batch_summary_{timestamp}.json          # 离线 ASR 汇总
+  baseline_comparison_{timestamp}.csv/.json   # ΔWER 对比
+  sweep_comparison_{timestamp}.csv/.json      # 参数扫参结果
+  thread_sweep_{timestamp}.csv/.json          # 线程扫参结果
+  e2e_test_report_{date}.md                   # 测试报告
 ```
 
 ## 4. 指标体系
@@ -73,9 +82,9 @@ e2e_batch_summary_{mode}_{timestamp}.json  # 汇总+元信息
 | 指标 | 定义 | 来源 |
 |------|------|------|
 | WER | 词错误率 (Levenshtein 距离) | `simple_wer()` |
-| WER p50/p90/p95 | 分位数 | `Get-Percentile()` |
+| WER p50/p90/p95 | 分位数 | `percentile()` |
 | WER 分布 | 0% / <5% / ≥20% 文件占比 | 汇总统计 |
-| ΔWER | WER_e2e − WER_offline | `compare_e2e_baseline.ps1` |
+| ΔWER | WER_e2e − WER_offline | `compare_e2e_baseline.py` |
 
 ### 4.2 延迟 (Latency)
 
@@ -116,29 +125,29 @@ e2e_batch_summary_{mode}_{timestamp}.json  # 汇总+元信息
 
 ### 6.1 日常回归
 
-```powershell
+```bash
 # 1. 打 Accuracy 基线 (10 条)
-.\scripts\run_e2e_batch.ps1 -MaxFiles 10
+python scripts/run_e2e_batch.py --max-files 10
 
 # 2. 与 offline ASR 对比
-.\scripts\run_asr_batch.ps1 -MaxFiles 10
-.\scripts\compare_e2e_baseline.ps1
+python scripts/run_asr_batch.py --max-files 10
+python scripts/compare_e2e_baseline.py
 ```
 
 ### 6.2 参数调优
 
-```powershell
+```bash
 # ChunkingConfig 扫参
-.\scripts\run_e2e_sweep.ps1 -MaxFiles 10
+python scripts/run_e2e_sweep.py --max-files 10
 
 # 线程扫参
-.\scripts\run_thread_sweep.ps1 -MaxFiles 10
+python scripts/run_thread_sweep.py --max-files 10
 ```
 
 ### 6.3 预览质量评测
 
-```powershell
-.\scripts\run_e2e_batch.ps1 -Suite Latency -DisplayEval -MaxFiles 5
+```bash
+python scripts/run_e2e_batch.py --suite Latency --display-eval --max-files 5
 ```
 
 ## 7. 已知限制
