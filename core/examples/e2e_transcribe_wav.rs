@@ -117,6 +117,8 @@ fn main() {
     let mut final_count = 0u32;
     let mut hardcut_count = 0u32;
     let mut provisional_count = 0u32;
+    let mut flush_used = false;
+    let mut asr_error_count = 0u32;
     let start = Instant::now();
 
     println!("\n--- Utterance breakdown ---");
@@ -144,11 +146,11 @@ fn main() {
                 }
                 ChunkType::Final => {
                     final_count += 1;
-                    asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
+                    asr_and_log(&sv, &mut vad, chunk_index, "Final", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
                 }
                 ChunkType::HardCut => {
                     hardcut_count += 1;
-                    asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
+                    asr_and_log(&sv, &mut vad, chunk_index, "HardCut", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
                 }
             }
         }
@@ -170,7 +172,8 @@ fn main() {
                     chunk_durations.push(chunk_sec);
                     chunk_index += 1;
                     final_count += 1;
-                    asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
+                    flush_used = true;
+                    asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms, &mut asr_error_count);
                     break;
                 }
                 ChunkType::Provisional => {
@@ -209,6 +212,8 @@ fn main() {
     println!("\n=== Segmentation Quality ===");
     println!("Total chunks: {}  (Final: {}, HardCut: {}, Provisional: {})",
         total_chunks, final_count, hardcut_count, provisional_count);
+    println!("Flush: {}  |  ASR errors: {}",
+        if flush_used { "yes" } else { "no" }, asr_error_count);
     if !chunk_durations.is_empty() {
         println!("Avg chunk: {:.1}s  |  Min: {:.1}s  |  Max: {:.1}s",
             avg_chunk, min_chunk, max_chunk);
@@ -224,6 +229,7 @@ fn asr_and_log(
     chunk_sec: f64,
     e2e_text: &mut String,
     total_asr_ms: &mut u64,
+    asr_error_count: &mut u32,
 ) {
     let t0 = Instant::now();
     match sv.transcribe(samples) {
@@ -238,6 +244,7 @@ fn asr_and_log(
             println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  (no speech)");
         }
         Err(e) => {
+            *asr_error_count += 1;
             println!("#{chunk_index:4}  {label:<12}  {chunk_sec:6.1}s chunk     0ms ASR  [!] ASR error: {e}");
         }
     }

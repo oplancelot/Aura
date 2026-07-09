@@ -1,11 +1,18 @@
 # LJSpeech E2E 管线测试
 # 编译后遍历 WAV 文件运行 e2e_transcribe_wav
-# Usage: .\scripts\run_e2e_batch.ps1 [max_files]
-# 输出: e2e_batch_results.csv + terminal summary
+# Usage:
+#   .\scripts\run_e2e_batch.ps1 [-MaxFiles N] [-Realtime] [-Suite Accuracy|Latency]
+# 输出: e2e_batch_results.csv + e2e_batch_summary.json + terminal summary
 
 param(
-    [int]$MaxFiles = 0
+    [int]$MaxFiles = 0,
+    [switch]$Realtime,
+    [ValidateSet("Accuracy", "Latency")]
+    [string]$Suite = "Accuracy"
 )
+
+if ($Suite -eq "Latency") { $Realtime = $true }
+$modeName = if ($Realtime) { "realtime" } else { "accuracy" }
 
 function Get-Percentile {
     param(
@@ -26,9 +33,34 @@ function Get-Percentile {
 
 $wavDir = "OpenSLR/LJSpeech/wavs"
 $example = "core\target\release\examples\e2e_transcribe_wav.exe"
+$timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd_HHmmss")
+$csvOut = "e2e_batch_results_${modeName}_${timestamp}.csv"
+$jsonOut = "e2e_batch_summary_${modeName}_${timestamp}.json"
+
+# Protocol metadata (must match e2e_transcribe_wav + ChunkingConfig::default)
+$chunkingConfig = [ordered]@{
+    silence_close_ms        = 200
+    provisional_start_ms    = 1000
+    provisional_interval_ms = 200
+    hard_cut_ms             = 5000
+    hard_cut_overlap_ms     = 2000
+}
+$models = [ordered]@{
+    vad = "assets/silero_vad.onnx"
+    asr = "assets/sense-voice-small-q4_k.gguf"
+}
+
+$gitCommit = (git rev-parse HEAD 2>$null)
+if (-not $gitCommit) { $gitCommit = "unknown" }
+$gitDirty = (git status --porcelain 2>$null)
+$gitDirtyFlag = if ($gitDirty) { $true } else { $false }
+$startedAt = (Get-Date).ToUniversalTime().ToString("o")
+$machine = $env:COMPUTERNAME
+if (-not $machine) { $machine = "unknown" }
 
 # Build once
 Write-Host "Building e2e_transcribe_wav..."
+Write-Host "Suite: $Suite  |  Mode: $modeName  |  Commit: $($gitCommit.Substring(0, [Math]::Min(12, $gitCommit.Length)))"
 Push-Location core
 cargo build --release --example e2e_transcribe_wav 2>&1
 Pop-Location
@@ -38,7 +70,7 @@ if (-not (Test-Path $example)) {
     exit 1
 }
 
-$wavs = Get-ChildItem "$wavDir/*.wav"
+$wavs = @(Get-ChildItem "$wavDir/*.wav" | Sort-Object Name)
 if ($MaxFiles -gt 0) {
     $wavs = $wavs | Select-Object -First $MaxFiles
 }
@@ -60,6 +92,9 @@ $sumMaxChunk = 0.0
 $globalMinChunk = [double]::MaxValue
 $globalMaxChunk = [double]::MinValue
 $multiChunkFiles = 0
+$flushFiles = 0
+$asrErrorFiles = 0
+$noRefCount = 0
 $werZero = 0
 $werUnder5 = 0
 $werOver20 = 0
@@ -71,7 +106,11 @@ foreach ($wav in $wavs) {
     $name = $wav.BaseName
     Write-Progress -Activity "E2E Testing" -Status "$name ($tested/$totalCount)" -PercentComplete (($tested / $totalCount) * 100)
 
-    $output = & $example $wav.FullName 2>$null
+    if ($Realtime) {
+        $output = & $example $wav.FullName --realtime 2>$null
+    } else {
+        $output = & $example $wav.FullName 2>$null
+    }
 
     $wer = $null
     $asrMs = 0.0
@@ -82,11 +121,14 @@ foreach ($wav in $wavs) {
     $hardCut = 0
     $provisional = 0
     $minChunk = 0.0; $avgChunk = 0.0; $maxChunk = 0.0
+    $flushThisFile = $false; $asrErrorsThisFile = 0
+    $parsedMode = $null
 
     # Parse summary lines
     # Example summary: "Audio: 6.0s | Processing: 0.9s | ASR: 720ms total | RTF: 0.15x"
     foreach ($line in $output) {
-        if ($line -match "^WER: ([\d.]+)%") { $wer = [double]$Matches[1] }
+        if ($line -match "^Mode: (\w+)") { $parsedMode = $Matches[1] }
+        elseif ($line -match "^WER: ([\d.]+)%") { $wer = [double]$Matches[1] }
         elseif ($line -match "^Audio: ([\d.]+)s\s*\|\s*Processing: ([\d.]+)s\s*\|\s*ASR: (\d+)ms") {
             $audioTime = [double]$Matches[1]
             $procTime = [double]$Matches[2]
@@ -103,6 +145,13 @@ foreach ($wav in $wavs) {
             $minChunk = [double]$Matches[2]
             $maxChunk = [double]$Matches[3]
         }
+        elseif ($line -match "^Flush: (\w+).*ASR errors: (\d+)") {
+            $flushThisFile = ($Matches[1] -eq "yes")
+            $asrErrorsThisFile = [int]$Matches[2]
+        }
+    }
+    if ($parsedMode -and $parsedMode -ne $modeName) {
+        Write-Host "  WARN: binary Mode=$parsedMode expected=$modeName" -ForegroundColor Yellow
     }
 
     Write-Host "[$($tested+1)/$totalCount] $name" -NoNewline
@@ -121,6 +170,8 @@ foreach ($wav in $wavs) {
             Min_Chunk_s = $minChunk
             Avg_Chunk_s = $avgChunk
             Max_Chunk_s = $maxChunk
+            Flush = $flushThisFile
+            ASR_Errors = $asrErrorsThisFile
         }
         $totalWER += $wer
         $totalAsrMs += $asrMs
@@ -140,41 +191,117 @@ foreach ($wav in $wavs) {
         if ($minChunk -gt 0 -and $minChunk -lt $globalMinChunk) { $globalMinChunk = $minChunk }
         if ($maxChunk -gt $globalMaxChunk) { $globalMaxChunk = $maxChunk }
         if ($chunks -gt 1) { $multiChunkFiles++ }
+        if ($flushThisFile) { $flushFiles++ }
+        if ($asrErrorsThisFile -gt 0) { $asrErrorFiles++ }
         $tested++
     } else {
         Write-Host "  (no reference)"
+        $noRefCount++
     }
 }
 
+$finishedAt = (Get-Date).ToUniversalTime().ToString("o")
+$avgWer = $null; $avgAsr = $null; $avgProc = $null
+$werP50 = $null; $werP90 = $null; $werP95 = $null
+$asrP50 = $null; $asrP90 = $null; $asrP95 = $null
+$meanAvgChunk = $null; $meanMinChunk = $null; $meanMaxChunk = $null
+$gMin = $null; $gMax = $null
+$multiChunkPct = $null
+
 Write-Host "`n=== E2E Batch Summary ==="
 Write-Host "Files tested: $tested / $totalCount"
+Write-Host "Suite: $Suite  |  Mode: $modeName"
 if ($tested -gt 0) {
     $werArr = $werList.ToArray()
     $asrArr = $asrList.ToArray()
+    $avgWer = [math]::Round($totalWER / $tested, 1)
+    $avgAsr = [math]::Round($totalAsrMs / $tested, 0)
+    $avgProc = [math]::Round($totalProcessTime / $tested, 2)
     $werP50 = [math]::Round((Get-Percentile -Values $werArr -Percentile 50), 1)
     $werP90 = [math]::Round((Get-Percentile -Values $werArr -Percentile 90), 1)
     $werP95 = [math]::Round((Get-Percentile -Values $werArr -Percentile 95), 1)
     $asrP50 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 50), 0)
     $asrP90 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 90), 0)
     $asrP95 = [math]::Round((Get-Percentile -Values $asrArr -Percentile 95), 0)
-
-    Write-Host "Avg WER: $([math]::Round($totalWER / $tested, 1))%  |  p50/p90/p95: ${werP50}% / ${werP90}% / ${werP95}%"
-    Write-Host "Avg ASR: $([math]::Round($totalAsrMs / $tested, 0))ms  |  p50/p90/p95: ${asrP50}ms / ${asrP90}ms / ${asrP95}ms"
-    Write-Host "Avg Processing: $([math]::Round($totalProcessTime / $tested, 2))s"
-    Write-Host "Total ASR time: $([math]::Round($totalAsrMs / 1000, 1))s"
-    Write-Host "WER distribution: 0%=$werZero ($([math]::Round(100.0 * $werZero / $tested, 0))%)  |  <5%=$werUnder5 ($([math]::Round(100.0 * $werUnder5 / $tested, 0))%)  |  >=20%=$werOver20 ($([math]::Round(100.0 * $werOver20 / $tested, 0))%)"
-
-    Write-Host "`n=== Segmentation Quality ($tested files) ==="
-    Write-Host "Total chunks: $totalChunks  (Final: $totalFinal | HardCut: $totalHardCut | Provisional: $totalProvisional)"
-    Write-Host "Files with >1 chunk: $multiChunkFiles ($([math]::Round($multiChunkFiles / $tested * 100, 0))%)"
     $meanAvgChunk = [math]::Round($sumAvgChunk / $tested, 2)
     $meanMinChunk = [math]::Round($sumMinChunk / $tested, 2)
     $meanMaxChunk = [math]::Round($sumMaxChunk / $tested, 2)
     $gMin = if ($globalMinChunk -lt [double]::MaxValue) { [math]::Round($globalMinChunk, 2) } else { 0 }
     $gMax = if ($globalMaxChunk -gt [double]::MinValue) { [math]::Round($globalMaxChunk, 2) } else { 0 }
+    $multiChunkPct = [math]::Round(100.0 * $multiChunkFiles / $tested, 0)
+
+    Write-Host "Avg WER: ${avgWer}%  |  p50/p90/p95: ${werP50}% / ${werP90}% / ${werP95}%"
+    Write-Host "Avg ASR: ${avgAsr}ms  |  p50/p90/p95: ${asrP50}ms / ${asrP90}ms / ${asrP95}ms"
+    Write-Host "Avg Processing: ${avgProc}s"
+    Write-Host "Total ASR time: $([math]::Round($totalAsrMs / 1000, 1))s"
+    Write-Host "WER distribution: 0%=$werZero ($([math]::Round(100.0 * $werZero / $tested, 0))%)  |  <5%=$werUnder5 ($([math]::Round(100.0 * $werUnder5 / $tested, 0))%)  |  >=20%=$werOver20 ($([math]::Round(100.0 * $werOver20 / $tested, 0))%)"
+
+    Write-Host "`n=== Segmentation Quality ($tested files) ==="
+    Write-Host "Total chunks: $totalChunks  (Final: $totalFinal | HardCut: $totalHardCut | Provisional: $totalProvisional)"
+    Write-Host "Files with >1 chunk: $multiChunkFiles ($multiChunkPct%)"
+    Write-Host "Flush used: $flushFiles ($([math]::Round(100.0 * $flushFiles / $tested, 0))%)  |  ASR errors: $asrErrorFiles files"
+    Write-Host "No reference found: $noRefCount"
     Write-Host "Mean of per-file avg/min/max chunk: ${meanAvgChunk}s / ${meanMinChunk}s / ${meanMaxChunk}s"
     Write-Host "Global min/max chunk: ${gMin}s / ${gMax}s"
 }
 
-$results | Export-Csv "e2e_batch_results.csv" -NoTypeInformation
-Write-Host "`nResults saved to e2e_batch_results.csv"
+$results | Export-Csv $csvOut -NoTypeInformation
+
+$summary = [ordered]@{
+    protocol_version = "1.0"
+    suite            = $Suite
+    mode             = $modeName
+    started_at_utc   = $startedAt
+    finished_at_utc  = $finishedAt
+    git_commit       = $gitCommit
+    git_dirty        = $gitDirtyFlag
+    machine          = $machine
+    dataset          = [ordered]@{
+        name       = "LJSpeech"
+        wav_dir    = $wavDir
+        max_files  = $MaxFiles
+        total_wavs = $totalCount
+        tested     = $tested
+        selection  = if ($MaxFiles -gt 0) { "first_n_sorted_by_name" } else { "all_sorted_by_name" }
+    }
+    models           = $models
+    chunking_config  = $chunkingConfig
+    metrics          = [ordered]@{
+        avg_wer_pct              = $avgWer
+        wer_p50_pct              = $werP50
+        wer_p90_pct              = $werP90
+        wer_p95_pct              = $werP95
+        wer_zero_count           = $werZero
+        wer_under_5_count        = $werUnder5
+        wer_over_20_count        = $werOver20
+        avg_asr_ms               = $avgAsr
+        asr_p50_ms               = $asrP50
+        asr_p90_ms               = $asrP90
+        asr_p95_ms               = $asrP95
+        avg_processing_s         = $avgProc
+        total_asr_s              = if ($tested -gt 0) { [math]::Round($totalAsrMs / 1000, 1) } else { $null }
+        total_chunks             = $totalChunks
+        final_chunks             = $totalFinal
+        hardcut_chunks           = $totalHardCut
+        provisional_chunks       = $totalProvisional
+        multi_chunk_files        = $multiChunkFiles
+        multi_chunk_pct          = $multiChunkPct
+        flush_files              = $flushFiles
+        flush_pct                = if ($tested -gt 0) { [math]::Round(100.0 * $flushFiles / $tested, 0) } else { $null }
+        asr_error_files          = $asrErrorFiles
+        no_ref_count             = $noRefCount
+        mean_avg_chunk_s         = $meanAvgChunk
+        mean_min_chunk_s         = $meanMinChunk
+        mean_max_chunk_s         = $meanMaxChunk
+        global_min_chunk_s       = $gMin
+        global_max_chunk_s       = $gMax
+    }
+    artifacts        = [ordered]@{
+        results_csv = "e2e_batch_results_${modeName}_${timestamp}.csv"
+        summary_json = "e2e_batch_summary_${modeName}_${timestamp}.json"
+    }
+}
+
+$summary | ConvertTo-Json -Depth 6 | Set-Content -Path $jsonOut -Encoding utf8
+Write-Host "`nResults saved to $csvOut"
+Write-Host "Summary saved to $jsonOut"
