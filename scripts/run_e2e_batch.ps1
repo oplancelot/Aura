@@ -8,7 +8,9 @@ param(
     [int]$MaxFiles = 0,
     [switch]$Realtime,
     [ValidateSet("Accuracy", "Latency")]
-    [string]$Suite = "Accuracy"
+    [string]$Suite = "Accuracy",
+    [int]$SilenceClose = 0,  # override silence_close_ms (0 = leave default)
+    [int]$HardCut = 0        # override hard_cut_ms (0 = leave default)
 )
 
 if ($Suite -eq "Latency") { $Realtime = $true }
@@ -108,11 +110,11 @@ foreach ($wav in $wavs) {
     $name = $wav.BaseName
     Write-Progress -Activity "E2E Testing" -Status "$name ($tested/$totalCount)" -PercentComplete (($tested / $totalCount) * 100)
 
-    if ($Realtime) {
-        $output = & $example $wav.FullName --realtime 2>$null
-    } else {
-        $output = & $example $wav.FullName 2>$null
-    }
+    $cmdline = @($wav.FullName)
+    if ($Realtime) { $cmdline += "--realtime" }
+    if ($SilenceClose -gt 0) { $cmdline += "--silence-close"; $cmdline += "$SilenceClose" }
+    if ($HardCut -gt 0) { $cmdline += "--hard-cut"; $cmdline += "$HardCut" }
+    $output = & $example $cmdline 2>$null
 
     $wer = $null
     $asrMs = 0.0

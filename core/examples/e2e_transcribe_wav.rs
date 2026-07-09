@@ -19,14 +19,29 @@ fn main() {
         .find(|a| !a.starts_with('-'))
         .map(|s| s.as_str());
     let Some(wav_path) = wav_path else {
-        eprintln!("Usage: {} <wav_path> [--realtime]", args[0]);
+        eprintln!("Usage: {} <wav_path> [--realtime] [--silence-close N] [--hard-cut N]", args[0]);
         eprintln!("  default: Accuracy mode (fast, no frame sleep)");
         eprintln!("  --realtime: sleep ~16ms per VAD frame (simulates live capture)");
+        eprintln!("  --silence-close N: silence_close_ms (default 200)");
+        eprintln!("  --hard-cut N: hard_cut_ms (default 5000)");
         std::process::exit(1);
     };
     let wav_file = Path::new(wav_path);
     let mode_name = if realtime { "realtime" } else { "accuracy" };
     println!("Mode: {mode_name}");
+
+    // Parse optional config overrides
+    fn parse_arg(args: &[String], name: &str) -> Option<u64> {
+        args.windows(2).find(|w| w[0] == name)?.get(1)?.parse().ok()
+    }
+    let silence_close = parse_arg(&args, "--silence-close").unwrap_or(200);
+    let hard_cut = parse_arg(&args, "--hard-cut").unwrap_or(5000);
+    let config = ChunkingConfig {
+        silence_close_ms: silence_close,
+        hard_cut_ms: hard_cut,
+        ..ChunkingConfig::default()
+    };
+    println!("Config: silence_close={silence_close}ms  hard_cut={hard_cut}ms");
 
     // Auto-extract reference text from metadata.csv or .trans.txt
     let reference = extract_reference(wav_file);
@@ -102,7 +117,7 @@ fn main() {
     let _ = vad.process_frame(&warmup);
     vad.reset_state();
 
-    let mut state_machine = ChunkingStateMachine::new(ChunkingConfig::default());
+    let mut state_machine = ChunkingStateMachine::new(config);
     let sv = SenseVoiceEngine::new(asr_model.to_str().unwrap())
         .expect("Failed to load SenseVoice model");
 
