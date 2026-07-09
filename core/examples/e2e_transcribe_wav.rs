@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::path::Path;
 
 use aura_core::vad::{SileroVad, ChunkingStateMachine, ChunkType};
@@ -25,7 +25,7 @@ fn main() {
     // Resolve model paths
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let vad_model = manifest_dir.join("..").join("assets").join("silero_vad.onnx");
-    let asr_model = manifest_dir.join("..").join("models").join("sense-voice-small-q4_k.gguf");
+    let asr_model = manifest_dir.join("..").join("assets").join("sense-voice-small-q4_k.gguf");
 
     if !vad_model.exists() {
         eprintln!("VAD model not found at: {}", vad_model.display());
@@ -116,6 +116,7 @@ fn main() {
         let frame = &pcm[pos..pos + SileroVad::AUDIO_SAMPLES];
         let vad_result = vad.process_frame(frame)
             .expect("VAD inference failed");
+        std::thread::sleep(Duration::from_millis(16)); // simulate real-time frame interval
 
         if let Some(chunk) = state_machine.feed(&vad_result, frame) {
             chunk_index += 1;
@@ -143,16 +144,25 @@ fn main() {
         pos += SileroVad::AUDIO_SAMPLES;
     }
 
-    // Flush: if any remaining audio didn't trigger Final/HardCut
-    if pos < pcm_len {
-        let remaining = &pcm[pos..];
-        if remaining.len() >= 16000 { // at least 1 second
-            chunk_index += 1;
-            let chunk_sec = remaining.len() as f64 / 16000.0;
-            chunk_durations.push(chunk_sec);
-            final_count += 1;
-
-            asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", remaining, chunk_sec, &mut e2e_text, &mut total_asr_ms);
+    // Flush: feed silence frames to flush any in-progress utterance
+    let silence_frame = vec![0.0f32; SileroVad::AUDIO_SAMPLES];
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(16));
+        let Ok(silence_result) = vad.process_frame(&silence_frame) else { break };
+        if let Some(chunk) = state_machine.feed(&silence_result, &silence_frame) {
+            match chunk.chunk_type {
+                ChunkType::Final | ChunkType::HardCut => {
+                    let chunk_sec = chunk.samples.len() as f64 / 16000.0;
+                    chunk_durations.push(chunk_sec);
+                    chunk_index += 1;
+                    final_count += 1;
+                    asr_and_log(&sv, &mut vad, chunk_index, "Final(flush)", &chunk.samples, chunk_sec, &mut e2e_text, &mut total_asr_ms);
+                    break;
+                }
+                ChunkType::Provisional => {
+                    // continue feeding silence for Final
+                }
+            }
         }
     }
 
