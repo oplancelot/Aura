@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -34,6 +37,13 @@ public class TranslationOverlay : IDisposable
     private readonly object _logLock = new();
     private DateTime _sessionStart;
 
+#if DEBUG
+    private readonly Channel<string> _timingChannel = Channel.CreateUnbounded<string>();
+    private readonly CancellationTokenSource _timingCts = new();
+    private Task? _timingWriterTask;
+    private int _chunkSeq;
+#endif
+
     public TranslationOverlay()
     {
         _subtitleQueue = new SubtitleQueue();
@@ -61,6 +71,15 @@ public class TranslationOverlay : IDisposable
 
             var transcriptPath = Path.Combine(logDir, $"transcript_{_sessionStart:yyyyMMdd_HHmmss}.txt");
             _transcriptWriter = new StreamWriter(transcriptPath, append: false) { AutoFlush = true };
+
+#if DEBUG
+            var timingPath = Path.Combine(logDir, $"timing_{_sessionStart:yyyyMMdd_HHmmss}.csv");
+            var header = "seq,type,audio_ms,asr_ms,rust_ms,"
+                       + "received_us,rendered_us,display_delay_us,"
+                       + "e2e_render_ms";
+            _timingChannel.Writer.TryWrite(header);
+            _timingWriterTask = Task.Run(() => TimingWriterLoop(timingPath, _timingCts.Token));
+#endif
         }
         catch (Exception ex)
         {
@@ -150,6 +169,10 @@ public class TranslationOverlay : IDisposable
             }
         }
 
+#if DEBUG
+        var seq = Interlocked.Increment(ref _chunkSeq);
+#endif
+
         var entry = new SubtitleEntry
         {
             Text = text,
@@ -209,6 +232,13 @@ public class TranslationOverlay : IDisposable
                 _transcriptWriter = null;
             }
         }
+
+#if DEBUG
+        _timingChannel.Writer.TryComplete();
+        _timingCts.Cancel();
+        _timingWriterTask?.GetAwaiter().GetResult();
+        _timingCts.Dispose();
+#endif
     }
 
     private void OnDragRequested(object sender, MouseButtonEventArgs e)
@@ -272,6 +302,7 @@ public class TranslationOverlay : IDisposable
         }
 
         // Update text and color on reused elements
+        var now = DateTime.UtcNow;
         for (int i = 0; i < count; i++)
         {
             var entry = last[i];
@@ -279,8 +310,51 @@ public class TranslationOverlay : IDisposable
             var textEl = (TextBlock)border.Child;
             textEl.Text = entry.Text;
             textEl.Foreground = entry.IsProvisional ? ProvisionalBrush : FinalBrush;
+
+#if DEBUG
+            if (entry.RenderedAt == null)
+            {
+                entry.RenderedAt = now;
+                var elapsed = now - _sessionStart;
+                var receivedElapsed = entry.Timestamp - _sessionStart;
+                var displayDelayUs = (long)(now - entry.Timestamp).TotalMicroseconds;
+                var receivedUs = (long)receivedElapsed.TotalMicroseconds;
+                var renderedUs = (long)elapsed.TotalMicroseconds;
+                var e2eRenderMs = (int)(now - entry.Timestamp).TotalMilliseconds
+                    + (int)entry.Metrics.RustTotalMs;
+                var type = entry.IsProvisional ? "P" : "F";
+                var row = $"{_chunkSeq},{type},{entry.Metrics.AudioDurationMs},"
+                    + $"{entry.Metrics.AsrInferenceMs},{entry.Metrics.RustTotalMs},"
+                    + $"{receivedUs},{renderedUs},{displayDelayUs},"
+                    + $"{e2eRenderMs}";
+                _timingChannel.Writer.TryWrite(row);
+            }
+#endif
         }
     }
+
+#if DEBUG
+    private async Task TimingWriterLoop(string path, CancellationToken ct)
+    {
+        try
+        {
+            using var writer = new StreamWriter(path, append: false) { AutoFlush = true };
+            var reader = _timingChannel.Reader;
+            while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var line))
+                {
+                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Timing writer error: {ex.Message}");
+        }
+    }
+#endif
 }
 
 /// <summary>
@@ -293,4 +367,7 @@ public class SubtitleEntry
     public int LatencyMs { get; set; }
     public Interop.AuraCoreBinding.TranslationMetrics Metrics { get; set; }
     public DateTime Timestamp { get; set; }
+#if DEBUG
+    public DateTime? RenderedAt { get; set; }
+#endif
 }
