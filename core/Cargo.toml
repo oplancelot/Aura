@@ -1,6 +1,6 @@
 [package]
 name = "aura_core"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Aura – real-time game voice translation core pipeline (audio capture → VAD → AI → FFI)"
 

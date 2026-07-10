@@ -10,9 +10,9 @@
     <AssemblyName>Aura</AssemblyName>
     <Description>Real-time AI subtitle overlay for any application</Description>
     <ApplicationIcon>..\..\assets\aura.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
+    <Version>0.1.2</Version>
+    <AssemblyVersion>0.1.2.0</AssemblyVersion>
+    <FileVersion>0.1.2.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +28,7 @@
     <None Include="..\..\core\target\debug\aura_core.dll" Condition="Exists('..\..\core\target\debug\aura_core.dll')" CopyToOutputDirectory="PreserveNewest" Link="aura_core.dll" />
     <!-- Copy model files from repo-level assets/ to output directory -->
     <None Include="..\..\assets\silero_vad.onnx" CopyToOutputDirectory="PreserveNewest" Link="silero_vad.onnx" />
+    <None Include="..\..\assets\sense-voice-small-q4_k.gguf" CopyToOutputDirectory="PreserveNewest" Link="sense-voice-small-q4_k.gguf" />
   </ItemGroup>
 
 </Project>
