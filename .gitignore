@@ -47,6 +47,9 @@ asr_batch_results*.csv
 scripts/logs/
 scripts/__pycache__/
 
+# ── Debug logs ──
+logs/
+
 # ── Generated feature files ──
 fbank_lfr_cmvn_feature.json
 
