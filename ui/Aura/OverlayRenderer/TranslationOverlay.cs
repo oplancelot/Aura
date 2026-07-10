@@ -2,9 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -32,14 +29,10 @@ public class TranslationOverlay : IDisposable
     private DispatcherTimer? _renderTimer;
     private bool _isClickThrough = true;
     private StreamWriter? _logWriter;
+    private StreamWriter? _transcriptWriter;
+    private string? _lastTranscriptText;
     private readonly object _logLock = new();
     private DateTime _sessionStart;
-
-    // Unified timing CSV via Channel — zero I/O on UI/render thread
-    private readonly Channel<string> _timingChannel = Channel.CreateUnbounded<string>();
-    private readonly CancellationTokenSource _timingCts = new();
-    private Task? _timingWriterTask;
-    private int _chunkSeq;
 
     public TranslationOverlay()
     {
@@ -59,22 +52,15 @@ public class TranslationOverlay : IDisposable
         {
             var logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
             Directory.CreateDirectory(logDir);
-            var logPath = Path.Combine(logDir,
-                $"asr_{_sessionStart:yyyyMMdd_HHmmss}.txt");
+
+            var logPath = Path.Combine(logDir, $"asr_{_sessionStart:yyyyMMdd_HHmmss}.txt");
             _logWriter = new StreamWriter(logPath, append: false) { AutoFlush = true };
             _logWriter.WriteLine($"# Aura ASR log — {_sessionStart:yyyy-MM-dd HH:mm:ss} UTC");
             _logWriter.WriteLine("# [elapsed]\t[type]\t[text]");
             _logWriter.WriteLine("# ---------\t------\t------");
 
-            // Background timing writer — async CSV via Channel, no blocking on hot path
-            var timingPath = Path.Combine(logDir,
-                $"timing_{_sessionStart:yyyyMMdd_HHmmss}.csv");
-            var header =
-                "seq,type,audio_ms,asr_ms,rust_ms,"
-                + "received_us,rendered_us,display_delay_us,"
-                + "e2e_render_ms";
-            _timingChannel.Writer.TryWrite(header);
-            _timingWriterTask = Task.Run(() => TimingWriterLoop(timingPath, _timingCts.Token));
+            var transcriptPath = Path.Combine(logDir, $"transcript_{_sessionStart:yyyyMMdd_HHmmss}.txt");
+            _transcriptWriter = new StreamWriter(transcriptPath, append: false) { AutoFlush = true };
         }
         catch (Exception ex)
         {
@@ -146,14 +132,21 @@ public class TranslationOverlay : IDisposable
         var now = DateTime.UtcNow;
         var elapsed = now - _sessionStart;
         var type = isProvisional != 0 ? "P" : "F";
-        var seq = Interlocked.Increment(ref _chunkSeq);
 
-        // Write to ASR log file (sync — small, amortized)
         if (_logWriter != null)
         {
             lock (_logLock)
             {
                 _logWriter.WriteLine($"{elapsed.TotalSeconds:F3}\t{type}\t{text}");
+            }
+        }
+
+        if (isProvisional == 0 && _transcriptWriter != null && text != _lastTranscriptText)
+        {
+            lock (_logLock)
+            {
+                _transcriptWriter.WriteLine($"[{now:yyyy-MM-dd HH:mm:ss}] {text}");
+                _lastTranscriptText = text;
             }
         }
 
@@ -197,7 +190,6 @@ public class TranslationOverlay : IDisposable
         _hotkeyManager?.Dispose();
         _window?.Close();
 
-        // Flush ASR log
         if (_logWriter != null)
         {
             lock (_logLock)
@@ -209,11 +201,14 @@ public class TranslationOverlay : IDisposable
             }
         }
 
-        // Complete timing channel and wait for background writer
-        _timingChannel.Writer.TryComplete();
-        _timingCts.Cancel();
-        _timingWriterTask?.GetAwaiter().GetResult();
-        _timingCts.Dispose();
+        if (_transcriptWriter != null)
+        {
+            lock (_logLock)
+            {
+                _transcriptWriter.Dispose();
+                _transcriptWriter = null;
+            }
+        }
     }
 
     private void OnDragRequested(object sender, MouseButtonEventArgs e)
@@ -277,7 +272,6 @@ public class TranslationOverlay : IDisposable
         }
 
         // Update text and color on reused elements
-        var now = DateTime.UtcNow;
         for (int i = 0; i < count; i++)
         {
             var entry = last[i];
@@ -285,50 +279,6 @@ public class TranslationOverlay : IDisposable
             var textEl = (TextBlock)border.Child;
             textEl.Text = entry.Text;
             textEl.Foreground = entry.IsProvisional ? ProvisionalBrush : FinalBrush;
-
-            // First render — write unified timing row via Channel (zero I/O on render thread)
-            if (entry.RenderedAt == null)
-            {
-                entry.RenderedAt = now;
-                var elapsed = now - _sessionStart;
-                var receivedElapsed = entry.Timestamp - _sessionStart;
-                var displayDelayUs = (long)(now - entry.Timestamp).TotalMicroseconds;
-                var receivedUs = (long)receivedElapsed.TotalMicroseconds;
-                var renderedUs = (long)elapsed.TotalMicroseconds;
-                var e2eRenderMs = (int)(now - entry.Timestamp).TotalMilliseconds
-                    + (int)entry.Metrics.RustTotalMs;
-                var type = entry.IsProvisional ? "P" : "F";
-                var row = $"{_chunkSeq},{type},{entry.Metrics.AudioDurationMs},"
-                    + $"{entry.Metrics.AsrInferenceMs},{entry.Metrics.RustTotalMs},"
-                    + $"{receivedUs},{renderedUs},{displayDelayUs},"
-                    + $"{e2eRenderMs}";
-                _timingChannel.Writer.TryWrite(row);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Background loop: reads timing rows from the Channel and writes them to CSV.
-    /// This is the ONLY place file I/O happens — never on the hot path.
-    /// </summary>
-    private async Task TimingWriterLoop(string path, CancellationToken ct)
-    {
-        try
-        {
-            using var writer = new StreamWriter(path, append: false) { AutoFlush = true };
-            var reader = _timingChannel.Reader;
-            while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
-            {
-                while (reader.TryRead(out var line))
-                {
-                    await writer.WriteLineAsync(line).ConfigureAwait(false);
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Timing writer error: {ex.Message}");
         }
     }
 }
@@ -343,5 +293,4 @@ public class SubtitleEntry
     public int LatencyMs { get; set; }
     public Interop.AuraCoreBinding.TranslationMetrics Metrics { get; set; }
     public DateTime Timestamp { get; set; }
-    public DateTime? RenderedAt { get; set; }
 }

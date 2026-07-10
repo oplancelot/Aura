@@ -1,5 +1,8 @@
+#[cfg(debug_assertions)]
 use std::fs;
+#[cfg(debug_assertions)]
 use std::io::Write;
+#[cfg(debug_assertions)]
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -165,14 +168,16 @@ fn run_self_test(stop_signal: Arc<AtomicBool>) {
     log::info!("Self-test pipeline stopped");
 }
 
-// ── Diagnostic helpers ──────────────────────────────────────────────
+// ── Diagnostic helpers (debug builds only) ──────────────────────────
 
+#[cfg(debug_assertions)]
 /// Logs VAD probability and decision to logs/vad_*.csv for offline analysis.
 struct VadLogger {
     file: std::fs::File,
     start: Instant,
 }
 
+#[cfg(debug_assertions)]
 impl VadLogger {
     fn new() -> std::io::Result<Self> {
         let dir = Path::new("logs");
@@ -194,6 +199,7 @@ impl VadLogger {
     }
 }
 
+#[cfg(debug_assertions)]
 /// Saves the first N seconds of captured audio to logs/capture_dump_*.raw
 /// for offline diagnosis of capture quality.
 struct CaptureDumper {
@@ -202,6 +208,7 @@ struct CaptureDumper {
     saved: bool,
 }
 
+#[cfg(debug_assertions)]
 impl CaptureDumper {
     fn new(duration_secs: f32) -> Self {
         Self {
@@ -268,8 +275,10 @@ fn run_pipeline(
     let mut frame_buffer: Vec<f32> = Vec::with_capacity(16_000 * 2);
     let pipeline_start = Instant::now();
 
-    // Diagnostic logging
+    // Diagnostic logging (debug builds only)
+    #[cfg(debug_assertions)]
     let mut vad_logger = VadLogger::new().ok();
+    #[cfg(debug_assertions)]
     let mut capture_dumper = CaptureDumper::new(10.0);
 
     while !stop_signal.load(Ordering::SeqCst) {
@@ -293,10 +302,12 @@ fn run_pipeline(
                         }
                     };
 
-                    // Diagnostic: log VAD probability and dump captured audio
+                    // Diagnostic: log VAD probability and dump captured audio (debug builds only)
+                    #[cfg(debug_assertions)]
                     if let Some(ref mut logger) = vad_logger {
                         logger.log(vad_result.probability, vad_result.is_speech);
                     }
+                    #[cfg(debug_assertions)]
                     capture_dumper.feed(&frame);
 
                     if let Some(chunk) = state_machine.feed(&vad_result, &frame) {
