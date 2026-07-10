@@ -48,7 +48,7 @@ public class LanguageManager : INotifyPropertyChanged
     public string DownloadAndRestart => Get("下载并重启", "Download && Restart");
     public string Downloading => Get("下载中...", "Downloading...");
     public string UpdateFailed(string msg) => string.Format(Get("更新失败：{0}", "Update failed: {0}"), msg);
-    public string CheckFailedGithub => Get("检查失败，请前往 GitHub 查看最新版本", "Check failed, visit GitHub for latest version");
+    public string CheckFailedGithub => Get("检查失败，请前往 GitHub 查看最新版本", "Check failed — see GitHub for latest");
     public string OpenGithub => Get("打开 GitHub", "Open GitHub");
 
     // ── Controls ────────────────────────────────────────────────────

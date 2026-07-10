@@ -103,6 +103,7 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="UpdateStatusText" Grid.Column="0"
                                FontSize="12" Foreground="#6C7086"
+                               TextWrapping="Wrap"
                                VerticalAlignment="Center"/>
                     <Button x:Name="CheckUpdateButton" Grid.Column="1"
                             Content="{Binding CheckButton}" Padding="16,4"
